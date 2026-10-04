@@ -1,6 +1,8 @@
 #include "TelemetryPopup.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../engine/HeadlessEngine.hpp"
+#include "../engine/ActiveLayerScope.hpp"
+#include "../core/CheatAPIIntegrator.hpp"
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PauseLayer.hpp>
@@ -134,6 +136,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 void TelemetryPopup::update(float dt) {
     // If running in background, advance headless search batch
     if (AStarSolver::get().isRunning() && m_headlessPlayLayer) {
+        ActiveLayerScope scope(m_headlessPlayLayer);
         AStarSolver::get().stepSearchBatch(m_headlessPlayLayer, HeadlessEngine::get().getBatchSize());
     }
 
@@ -210,8 +213,13 @@ void TelemetryPopup::cleanupHeadless() {
         AStarSolver::get().stop();
     }
     if (m_headlessPlayLayer) {
-        if (GameManager::sharedState()->m_playLayer == m_headlessPlayLayer) {
-            GameManager::sharedState()->m_playLayer = m_previousPlayLayer;
+        if (auto gm = GameManager::sharedState()) {
+            if (gm->m_playLayer == m_headlessPlayLayer) {
+                gm->m_playLayer = m_previousPlayLayer;
+            }
+            if (gm->m_gameLayer == m_headlessPlayLayer) {
+                gm->m_gameLayer = m_previousPlayLayer;
+            }
         }
         m_headlessPlayLayer->removeFromParentAndCleanup(true);
         m_headlessPlayLayer->release();
@@ -234,10 +242,13 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
 
     if (AStarSolver::get().isRunning()) return;
 
+    // Immediately notify CheatAPI to safeguard leaderboards
+    CheatAPIIntegrator::notifyCheatStarted();
+
     cleanupHeadless();
 
     // Cache the previous active PlayLayer (e.g. if opened from PauseLayer, or nullptr if from menu)
-    m_previousPlayLayer = GameManager::sharedState()->m_playLayer;
+    m_previousPlayLayer = GameManager::sharedState() ? GameManager::sharedState()->m_playLayer : nullptr;
 
     // Enable headless engine and silence audio before initializing PlayLayer
     HeadlessEngine::get().enableHeadless();
@@ -254,10 +265,6 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         return;
     }
 
-    // Immediately restore GameManager's active PlayLayer to prevent dangling pointers
-    // in other mods (e.g. BetterInfo, Attempt Playback)
-    GameManager::sharedState()->m_playLayer = m_previousPlayLayer;
-
     m_headlessPlayLayer->retain();
     m_headlessScene->addChild(m_headlessPlayLayer);
     m_headlessPlayLayer->m_isSilent = true;
@@ -267,17 +274,20 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
     m_headlessPlayLayer->setTouchEnabled(false);
     m_headlessPlayLayer->setMouseEnabled(false);
 
-    // Complete object creation synchronously if chunked across frames
-    int safetyLimit = 10000;
-    while (m_headlessPlayLayer->m_loadingProgress < 1.0f && --safetyLimit > 0) {
-        m_headlessPlayLayer->processCreateObjectsFromSetup();
-    }
+    {
+        // Scope active layer while setting up objects and initializing start state
+        ActiveLayerScope scope(m_headlessPlayLayer);
 
-    // Finalize level setup and spawn player at start position (or StartPos)
-    m_headlessPlayLayer->setupHasCompleted();
-    m_headlessPlayLayer->resetLevel();
-    m_headlessPlayLayer->startGame();
-    m_headlessPlayLayer->m_isPaused = false;
+        // Complete object creation synchronously if chunked across frames
+        int safetyLimit = 10000;
+        while (m_headlessPlayLayer->m_loadingProgress < 1.0f && --safetyLimit > 0) {
+            m_headlessPlayLayer->processCreateObjectsFromSetup();
+        }
+
+        m_headlessPlayLayer->resetLevel();
+        m_headlessPlayLayer->startGame();
+        m_headlessPlayLayer->m_isPaused = false;
+    }
 
     if (!m_headlessPlayLayer->m_player1 || !m_headlessPlayLayer->m_objects) {
         cleanupHeadless();
@@ -292,8 +302,11 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPositionY() : -1.0f
     );
 
-    // Start solver on the headless playLayer
-    AStarSolver::get().start(m_headlessPlayLayer);
+    // Start solver on the headless playLayer with active layer scope
+    {
+        ActiveLayerScope scope(m_headlessPlayLayer);
+        AStarSolver::get().start(m_headlessPlayLayer);
+    }
 
     m_startButton->setEnabled(false);
     m_stopButton->setEnabled(true);

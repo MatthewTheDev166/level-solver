@@ -55,6 +55,10 @@ private:
     TelemetryMetrics m_telemetry;
     uint32_t m_currentTick = 0;
     int m_levelID = 0;
+
+    CheckpointObject* m_milestoneCheckpoint = nullptr;
+    float m_lastMilestoneX = 0.0f;
+    size_t m_nearbyObstaclesDensity = 0;
 };
 
 } // namespace solver

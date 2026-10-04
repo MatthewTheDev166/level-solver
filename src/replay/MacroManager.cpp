@@ -122,8 +122,8 @@ void MacroManager::startReplay(PlayLayer* playLayer) {
 void MacroManager::stopReplay(PlayLayer* playLayer) {
     if (m_isReplaying) {
         m_isReplaying = false;
-        if (playLayer && playLayer->m_player1 && m_lastButtonState) {
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        if (playLayer && m_lastButtonState) {
+            playLayer->handleButton(false, 1, true);
             m_lastButtonState = false;
         }
         CheatAPIIntegrator::notifyCheatEnded();
@@ -140,10 +140,10 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
     while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
         const auto& act = m_actions[m_playbackIndex];
         if (act.pressed && !m_lastButtonState) {
-            playLayer->m_player1->pushButton(PlayerButton::Jump);
+            playLayer->handleButton(true, 1, true);
             m_lastButtonState = true;
         } else if (!act.pressed && m_lastButtonState) {
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            playLayer->handleButton(false, 1, true);
             m_lastButtonState = false;
         }
         m_playbackIndex++;

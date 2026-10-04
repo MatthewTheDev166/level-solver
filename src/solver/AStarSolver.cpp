@@ -43,6 +43,17 @@ void AStarSolver::start(PlayLayer* playLayer) {
     CheatAPIIntegrator::notifyCheatStarted();
     HeadlessEngine::get().enableHeadless();
 
+    m_lastMilestoneX = m_startX;
+    m_nearbyObstaclesDensity = 0;
+    if (m_milestoneCheckpoint) {
+        m_milestoneCheckpoint->release();
+        m_milestoneCheckpoint = nullptr;
+    }
+    m_milestoneCheckpoint = playLayer->createCheckpoint();
+    if (m_milestoneCheckpoint) {
+        m_milestoneCheckpoint->retain();
+    }
+
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
@@ -105,6 +116,10 @@ void AStarSolver::stop() {
         HeadlessEngine::get().disableHeadless();
         CheatAPIIntegrator::notifyCheatEnded();
         HazardDetector::clearIndex();
+        if (m_milestoneCheckpoint) {
+            m_milestoneCheckpoint->release();
+            m_milestoneCheckpoint = nullptr;
+        }
         m_telemetry.status = SolverStatus::Paused;
         m_telemetry.detailMessage = "Solver paused by user";
         geode::log::info("[LevelSolver] Solver stopped");
@@ -120,6 +135,12 @@ void AStarSolver::reset() {
     m_resolvedActions.clear();
     m_nodePool.clear();
     m_currentTick = 0;
+    if (m_milestoneCheckpoint) {
+        m_milestoneCheckpoint->release();
+        m_milestoneCheckpoint = nullptr;
+    }
+    m_lastMilestoneX = 0.0f;
+    m_nearbyObstaclesDensity = 0;
     m_telemetry = TelemetryMetrics();
 }
 
@@ -157,7 +178,7 @@ void AStarSolver::reconstructSolution(uint32_t winningNodeIndex) {
         bool isPressed = (node.action == ActionType::Jump);
         if (isPressed != lastState || i == 0) {
             TickAction act;
-            act.tick = node.snapshot.tick;
+            act.tick = (node.snapshot.tick > 0 ? node.snapshot.tick - 1 : 0);
             act.pressed = isPressed;
             m_resolvedActions.push_back(act);
             lastState = isPressed;
@@ -231,6 +252,25 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             m_maxReachedX = currentX;
         }
 
+        // Adaptive rolling-horizon checkpointing (5% default, 2% if obstacles > 500)
+        float distFromMilestone = current.snapshot.position.x - m_lastMilestoneX;
+        float horizonFrac = (m_nearbyObstaclesDensity > 500) ? 0.02f : 0.05f;
+        float horizonStep = horizonFrac * (m_levelLength - m_startX);
+        if (horizonStep > 50.0f && distFromMilestone >= horizonStep) {
+            m_lastMilestoneX = current.snapshot.position.x;
+            if (m_milestoneCheckpoint) {
+                m_milestoneCheckpoint->release();
+                m_milestoneCheckpoint = nullptr;
+            }
+            m_milestoneCheckpoint = playLayer->createCheckpoint();
+            if (m_milestoneCheckpoint) {
+                m_milestoneCheckpoint->retain();
+            }
+            m_spatialGrid.clear();
+            geode::log::info("[LevelSolver] Rolling-horizon checkpoint committed at X={:.1f} ({:.1f}%)",
+                m_lastMilestoneX, m_telemetry.explorationHorizon);
+        }
+
         // Gamemode-specific candidate action branching
         auto actions = ActionQuantizer::getCandidateActions(
             playLayer->m_player1,
@@ -251,11 +291,11 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_extraDelta = 0.0;
             playLayer->m_isPaused = false;
 
-            // Apply candidate action
+            // Apply candidate action via engine handleButton
             if (act == ActionType::Jump) {
-                playLayer->m_player1->pushButton(PlayerButton::Jump);
+                playLayer->handleButton(true, 1, true);
             } else {
-                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                playLayer->handleButton(false, 1, true);
             }
 
             // Headless fixed-step physics advance
@@ -264,7 +304,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             // If player died, backtrack
             if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
-                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                playLayer->handleButton(false, 1, true);
                 playLayer->m_playerDied = false;
                 playLayer->m_player1->m_isDead = false;
                 continue;
@@ -276,6 +316,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             size_t nearbyObs = 0;
             float clearance = HazardDetector::calculateClearance(nextSnap.position, playLayer->m_objects, nearbyObs);
+            m_nearbyObstaclesDensity = nearbyObs;
             uint32_t switches = current.actionSwitches + (act != current.action ? 1 : 0);
             uint32_t holdDur = (act == ActionType::Jump) ? (current.holdDuration + 1) : 0;
             float fScore = calculateHeuristic(nextSnap.position.x, switches, clearance);

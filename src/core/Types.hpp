@@ -134,10 +134,10 @@ struct PlayerSnapshot {
         player->m_playerSpeed = playerSpeed;
         player->m_gravity = gravity;
 
-        if (vehicleSize < 0.9f) {
-            player->togglePlayerScale(true, true);
-        } else {
-            player->togglePlayerScale(false, true);
+        bool isMini = (vehicleSize < 0.9f);
+        bool currentMini = (player->m_vehicleSize < 0.9f);
+        if (isMini != currentMini) {
+            player->togglePlayerScale(isMini, true);
         }
 
         if (player->m_isShip != (mode == VehicleMode::Ship)) player->toggleFlyMode(mode == VehicleMode::Ship, true);

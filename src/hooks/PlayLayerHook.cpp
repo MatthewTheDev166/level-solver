@@ -66,6 +66,14 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::destroyPlayer(player, object);
     }
 
+    void levelComplete() {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::levelComplete();
+    }
+
     void onQuit() {
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();
