@@ -369,15 +369,12 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
 
     cleanupHeadless();
 
+    // Queue replay so when PlayLayer starts, it automatically begins replay!
+    MacroManager::get().queueReplay(levelID, levelName);
+
     // Transition to gameplay scene to watch playback
     auto scene = PlayLayer::scene(m_level, false, false);
     CCDirector::sharedDirector()->pushScene(scene);
-
-    geode::Loader::get()->queueInMainThread([]() {
-        if (auto playLayer = PlayLayer::get()) {
-            MacroManager::get().startReplay(playLayer);
-        }
-    });
 
     this->onClose(nullptr);
 }

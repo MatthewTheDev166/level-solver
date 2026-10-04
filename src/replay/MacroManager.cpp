@@ -122,10 +122,21 @@ bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
     return std::filesystem::exists(getMacroPath(levelID, levelName));
 }
 
+void MacroManager::queueReplay(int levelID, const std::string& levelName) {
+    loadMacro(levelID, levelName);
+    m_pendingReplay = true;
+    geode::log::info("[LevelSolver] Queued macro replay for level ID {}, name '{}' ({} actions)", levelID, levelName, m_actions.size());
+}
+
+bool MacroManager::hasPendingReplay() const {
+    return m_pendingReplay;
+}
+
 void MacroManager::startReplay(PlayLayer* playLayer) {
     if (!playLayer || m_actions.empty()) return;
 
     m_isReplaying = true;
+    m_pendingReplay = false;
     m_accumulatedTime = 0.0f;
     m_playbackTick = 0;
     m_playbackIndex = 0;
@@ -136,6 +147,7 @@ void MacroManager::startReplay(PlayLayer* playLayer) {
 }
 
 void MacroManager::stopReplay(PlayLayer* playLayer) {
+    m_pendingReplay = false;
     if (m_isReplaying) {
         m_isReplaying = false;
         if (playLayer && m_lastButtonState) {

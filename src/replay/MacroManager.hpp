@@ -21,6 +21,9 @@ public:
     bool loadMacro(int levelID, const std::string& levelName = "");
     bool hasMacro(int levelID, const std::string& levelName = "") const;
 
+    void queueReplay(int levelID, const std::string& levelName = "");
+    bool hasPendingReplay() const;
+
     void startReplay(PlayLayer* playLayer);
     void stopReplay(PlayLayer* playLayer);
     void updateReplay(PlayLayer* playLayer, float dt);
@@ -33,6 +36,7 @@ private:
 
     std::vector<TickAction> m_actions;
     bool m_isReplaying = false;
+    bool m_pendingReplay = false;
     float m_accumulatedTime = 0.0f;
     uint32_t m_playbackTick = 0;
     size_t m_playbackIndex = 0;

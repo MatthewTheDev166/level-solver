@@ -9,6 +9,16 @@
 
 namespace solver {
 
+static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float startX) {
+    if (!playLayer || !playLayer->m_player1) return false;
+    if (playLayer->m_hasCompletedLevel) return true;
+    if (playLayer->m_player1->getPositionX() >= levelLength) return true;
+    float endX = playLayer->getEndPosition().x;
+    if (endX > startX + 50.0f && playLayer->m_player1->getPositionX() >= endX) return true;
+    if (playLayer->getCurrentPercent() >= 99.9f) return true;
+    return false;
+}
+
 SwarmSolver& SwarmSolver::get() {
     static SwarmSolver instance;
     return instance;
@@ -42,11 +52,15 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     }
 
     float endX = playLayer->getEndPosition().x;
-    if (maxObjX > m_startX + 100.0f) {
-        m_levelLength = std::max(endX, maxObjX + 150.0f);
+    if (endX > m_startX + 50.0f && endX <= maxObjX + 300.0f) {
+        m_levelLength = endX;
+    } else if (maxObjX > m_startX + 50.0f) {
+        m_levelLength = maxObjX + 80.0f;
+    } else if (endX > m_startX + 50.0f) {
+        m_levelLength = endX;
     } else {
-        // Empty / blank test level: set concise test length (~4s run, ~8 waves)
-        m_levelLength = m_startX + 1200.0f;
+        // Blank level with no objects
+        m_levelLength = m_startX + 600.0f;
     }
     m_maxReachedX = m_startX;
     m_currentTick = 0;
@@ -401,7 +415,7 @@ void SwarmSolver::simulateBot(
         playLayer->update(HeadlessEngine::FIXED_DT);
 
         // Check if finished level
-        if (playLayer->m_player1->getPositionX() >= m_levelLength || playLayer->m_hasCompletedLevel) {
+        if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
             completed = true;
             bot.survived = true;
             bot.finalX = playLayer->m_player1->getPositionX();
@@ -420,6 +434,13 @@ void SwarmSolver::simulateBot(
             playLayer->m_player1->m_isDead = false;
             return;
         }
+    }
+
+    if (!completed && isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
+        completed = true;
+        bot.survived = true;
+        bot.finalX = playLayer->m_player1->getPositionX();
+        bot.deathTick = checkpoint.startTick + horizonTicks;
     }
 
     if (!completed) {
@@ -517,7 +538,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     uint32_t horizonTicks = (mode == VehicleMode::Ship || mode == VehicleMode::Wave || mode == VehicleMode::Swing) ? 72 : 120;
 
     // Check if level already completed at this checkpoint
-    if (currentCp.startX >= m_levelLength) {
+    if (isSimulationFinished(playLayer, m_levelLength, currentCp.startX) || currentCp.startX >= m_levelLength) {
         finalizeSolution(currentCp.macroHistory);
         return;
     }
@@ -544,7 +565,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (bot.finalX > m_maxReachedX) {
                 m_maxReachedX = bot.finalX;
             }
-            if (bot.finalX >= m_levelLength || playLayer->m_hasCompletedLevel) {
+            if (isSimulationFinished(playLayer, m_levelLength, currentCp.startX)) {
                 // Winning bot! Append its actions and complete!
                 std::vector<TickAction> fullMacro = currentCp.macroHistory;
                 for (const auto& act : bot.segmentActions) {
@@ -590,7 +611,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             // Run best bot to capture target snapshot
             simulateBot(playLayer, currentCp, const_cast<SwarmBot&>(bestBot), m_currentHorizonTicks);
-            if (playLayer->m_hasCompletedLevel || bestBot.finalX >= m_levelLength) {
+            if (isSimulationFinished(playLayer, m_levelLength, currentCp.startX)) {
                 std::vector<TickAction> fullMacro = currentCp.macroHistory;
                 for (const auto& act : bestBot.segmentActions) {
                     fullMacro.push_back({ currentCp.startTick + act.tick, act.pressed });
@@ -649,6 +670,9 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     float totalDist = m_levelLength - m_startX;
     if (totalDist > 0.0f) {
         m_telemetry.explorationHorizon = std::clamp(((m_maxReachedX - m_startX) / totalDist) * 100.0f, 0.0f, 100.0f);
+    }
+    if (playLayer && playLayer->getCurrentPercent() > m_telemetry.explorationHorizon) {
+        m_telemetry.explorationHorizon = std::clamp(playLayer->getCurrentPercent(), 0.0f, 100.0f);
     }
     m_telemetry.activeWave = m_activeWaveIndex;
     m_telemetry.populationSize = m_currentPopulationSize;

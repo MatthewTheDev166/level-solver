@@ -48,6 +48,15 @@ class $modify(SolverPlayLayer, PlayLayer) {
         return true;
     }
 
+    void startGame() {
+        PlayLayer::startGame();
+        if (!solver::HeadlessEngine::get().isHeadless()) {
+            if (solver::MacroManager::get().hasPendingReplay()) {
+                solver::MacroManager::get().startReplay(this);
+            }
+        }
+    }
+
     void update(float dt) {
         // If macro replay is active, dispatch recorded inputs synchronized to delta time
         if (solver::MacroManager::get().isReplaying()) {
@@ -81,6 +90,30 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::destroyPlayer(player, object);
     }
 
+    void playEndAnimationToPos(cocos2d::CCPoint position) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::playEndAnimationToPos(position);
+    }
+
+    void playPlatformerEndAnimationToPos(cocos2d::CCPoint position, bool instant) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::playPlatformerEndAnimationToPos(position, instant);
+    }
+
+    void showEndLayer() {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            this->m_hasCompletedLevel = true;
+            return;
+        }
+        PlayLayer::showEndLayer();
+    }
+
     void levelComplete() {
         if (solver::HeadlessEngine::get().isHeadless()) {
             this->m_hasCompletedLevel = true;
@@ -107,8 +140,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
         // If replaying macro, restart playback
-        if (solver::MacroManager::get().isReplaying()) {
-            solver::MacroManager::get().startReplay(this);
+        if (!solver::HeadlessEngine::get().isHeadless()) {
+            if (solver::MacroManager::get().isReplaying() || solver::MacroManager::get().hasPendingReplay()) {
+                solver::MacroManager::get().startReplay(this);
+            }
         }
     }
 };
