@@ -213,8 +213,6 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             HeadlessEngine::get().disableHeadless();
             HazardDetector::clearIndex();
-            playLayer->resetLevel();
-            MacroManager::get().startReplay(playLayer);
             break;
         }
 
@@ -322,10 +320,11 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     if (m_openQueue.empty() && m_isRunning && !m_isCompleted) {
         m_isRunning = false;
         m_telemetry.status = SolverStatus::Failed;
-        m_telemetry.detailMessage = "Search space exhausted without finding completion path.";
+        m_telemetry.detailMessage = fmt::format("Search space exhausted at X={:.0f} (no surviving path)", m_maxReachedX);
         HeadlessEngine::get().disableHeadless();
         HazardDetector::clearIndex();
         CheatAPIIntegrator::notifyCheatEnded();
+        geode::log::warn("[LevelSolver] {}", m_telemetry.detailMessage);
     }
 }
 

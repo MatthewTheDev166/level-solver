@@ -11,6 +11,13 @@
 using namespace geode::prelude;
 
 class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
+    void playMusic(gd::string path, bool p1, float p2, int p3) {
+        if (solver::HeadlessEngine::get().isAudioSuppressed()) {
+            return;
+        }
+        FMODAudioEngine::playMusic(path, p1, p2, p3);
+    }
+
     void playEffect(gd::string path, float speed, float p2, float volume) {
         if (solver::HeadlessEngine::get().isAudioSuppressed()) {
             return;
@@ -20,10 +27,6 @@ class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
 };
 
 class $modify(SolverPlayLayer, PlayLayer) {
-    struct Fields {
-        bool m_isSteppingHeadless = false;
-    };
-
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) {
             return false;
@@ -40,39 +43,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
             }
         }
 
-        // If launched in solver mode, show TelemetryPopup overlay and start solver
-        if (solver::TelemetryPopup::s_launchWithSolver) {
-            solver::TelemetryPopup::s_launchWithSolver = false;
-            geode::Loader::get()->queueInMainThread([this, level]() {
-                if (auto playLayer = PlayLayer::get()) {
-                    auto popup = solver::TelemetryPopup::create(level);
-                    if (popup) {
-                        popup->show();
-                    }
-                    solver::AStarSolver::get().start(playLayer);
-                }
-            });
-        }
-
         return true;
     }
 
     void update(float dt) {
-        // Re-entrancy guard: if update() was triggered inside stepSearchBatch,
-        // pass directly to game physics without re-triggering stepSearchBatch
-        if (m_fields->m_isSteppingHeadless) {
-            PlayLayer::update(dt);
-            return;
-        }
-
-        // If autonomous forward state search is active, execute headless batch
-        if (solver::AStarSolver::get().isRunning()) {
-            m_fields->m_isSteppingHeadless = true;
-            solver::AStarSolver::get().stepSearchBatch(this, solver::HeadlessEngine::get().getBatchSize());
-            m_fields->m_isSteppingHeadless = false;
-            return;
-        }
-
         // If macro replay is active, dispatch recorded inputs synchronized to delta time
         if (solver::MacroManager::get().isReplaying()) {
             solver::MacroManager::get().updateReplay(this, dt);
@@ -91,16 +65,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::destroyPlayer(player, object);
     }
 
-    void visit() {
-        // Bypass all Cocos2d-x rendering, particles, batch nodes, and shaders in headless mode
-        if (solver::HeadlessEngine::get().isRenderingSuppressed()) {
-            return;
-        }
-        PlayLayer::visit();
-    }
-
     void onQuit() {
-        solver::TelemetryPopup::s_launchWithSolver = false;
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();
         }

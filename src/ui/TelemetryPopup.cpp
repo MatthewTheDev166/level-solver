@@ -131,22 +131,42 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
 
 void TelemetryPopup::update(float dt) {
+    // If running in background, advance headless search batch
+    if (AStarSolver::get().isRunning() && m_headlessPlayLayer) {
+        AStarSolver::get().stepSearchBatch(m_headlessPlayLayer, HeadlessEngine::get().getBatchSize());
+    }
+
     auto telemetry = AStarSolver::get().getTelemetry();
 
-    // Update status
-    std::string statusText = "Status: ";
-    switch (telemetry.status) {
-        case SolverStatus::Idle: statusText += "Idle"; break;
-        case SolverStatus::Searching: statusText += "Searching (A*)"; break;
-        case SolverStatus::Solved: statusText += "Solved (100%)"; break;
-        case SolverStatus::Replaying: statusText += "Replaying Macro"; break;
-        case SolverStatus::Paused: statusText += "Paused"; break;
-        case SolverStatus::Failed: statusText += "Search Failed"; break;
+    // Update status & print errors clearly on the menu
+    if (telemetry.status == SolverStatus::Solved) {
+        m_statusLabel->setString("Status: Solved (100%) - Solution saved to disk");
+        m_statusLabel->setColor({ 0, 255, 128 });
+        m_startButton->setEnabled(true);
+        m_stopButton->setEnabled(false);
+        m_replayButton->setEnabled(true);
+    } else if (telemetry.status == SolverStatus::Failed) {
+        std::string err = "Status: Error - ";
+        if (!telemetry.detailMessage.empty()) {
+            err += telemetry.detailMessage;
+        } else {
+            err += "Search space exhausted";
+        }
+        m_statusLabel->setString(err.c_str());
+        m_statusLabel->setColor({ 255, 60, 60 }); // Red for error
+        m_startButton->setEnabled(true);
+        m_stopButton->setEnabled(false);
+    } else if (telemetry.status == SolverStatus::Searching) {
+        std::string statusText = "Status: Searching (A*)";
+        if (!telemetry.detailMessage.empty()) {
+            statusText += " - " + telemetry.detailMessage;
+        }
+        m_statusLabel->setString(statusText.c_str());
+        m_statusLabel->setColor({ 0, 255, 128 });
+    } else if (telemetry.status == SolverStatus::Paused) {
+        m_statusLabel->setString("Status: Paused");
+        m_statusLabel->setColor({ 255, 200, 0 });
     }
-    if (!telemetry.detailMessage.empty()) {
-        statusText += " - " + telemetry.detailMessage;
-    }
-    m_statusLabel->setString(statusText.c_str());
 
     // Update tick
     m_tickLabel->setString(fmt::format("Current Tick: {}", telemetry.currentTick).c_str());
@@ -180,48 +200,72 @@ void TelemetryPopup::update(float dt) {
     m_replayButton->setEnabled(hasSavedMacro && !isSearching);
 }
 
-void TelemetryPopup::onClose(cocos2d::CCObject* sender) {
+TelemetryPopup::~TelemetryPopup() {
+    cleanupHeadless();
+}
+
+void TelemetryPopup::cleanupHeadless() {
     if (AStarSolver::get().isRunning()) {
         AStarSolver::get().stop();
     }
+    if (m_headlessPlayLayer) {
+        m_headlessPlayLayer->removeFromParentAndCleanup(true);
+        m_headlessPlayLayer->release();
+        m_headlessPlayLayer = nullptr;
+    }
+    if (m_headlessScene) {
+        m_headlessScene->release();
+        m_headlessScene = nullptr;
+    }
+    HeadlessEngine::get().disableHeadless();
+}
+
+void TelemetryPopup::onClose(cocos2d::CCObject* sender) {
+    cleanupHeadless();
     Popup::onClose(sender);
 }
 
 void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
     if (!m_level) return;
 
-    if (auto playLayer = PlayLayer::get()) {
-        // If inside PauseLayer or gameplay is paused, resume
-        if (auto scene = CCDirector::sharedDirector()->getRunningScene()) {
-            if (auto children = scene->getChildren()) {
-                for (auto* obj : CCArrayExt<CCObject*>(children)) {
-                    if (auto pauseLayer = typeinfo_cast<PauseLayer*>(obj)) {
-                        pauseLayer->onResume(nullptr);
-                        break;
-                    }
-                }
-            }
-        }
-        playLayer->resume();
+    if (AStarSolver::get().isRunning()) return;
 
-        if (AStarSolver::get().getTelemetry().status == SolverStatus::Paused) {
-            AStarSolver::get().resume(playLayer);
-        } else {
-            AStarSolver::get().start(playLayer);
-        }
+    cleanupHeadless();
+
+    // Enable headless engine and silence audio before initializing PlayLayer
+    HeadlessEngine::get().enableHeadless();
+
+    // Create an off-screen scene and PlayLayer purely for background simulation
+    m_headlessScene = cocos2d::CCScene::create();
+    m_headlessScene->retain();
+
+    m_headlessPlayLayer = PlayLayer::create(m_level, false, false);
+    if (!m_headlessPlayLayer) {
+        cleanupHeadless();
+        m_statusLabel->setString("Status: Error - Failed to initialize simulation");
+        m_statusLabel->setColor({ 255, 60, 60 });
         return;
     }
 
-    // Launch PlayLayer and set flag to display TelemetryPopup overlay on top of PlayLayer
-    s_launchWithSolver = true;
-    auto scene = PlayLayer::scene(m_level, false, false);
-    CCDirector::sharedDirector()->pushScene(scene);
+    m_headlessPlayLayer->retain();
+    m_headlessScene->addChild(m_headlessPlayLayer);
+    m_headlessPlayLayer->m_isSilent = true;
 
-    this->onClose(nullptr);
+    // Start solver on the headless playLayer
+    AStarSolver::get().start(m_headlessPlayLayer);
+
+    m_startButton->setEnabled(false);
+    m_stopButton->setEnabled(true);
+    m_statusLabel->setString("Status: Searching (A*)");
+    m_statusLabel->setColor({ 0, 255, 128 });
 }
 
 void TelemetryPopup::onStopSolver(cocos2d::CCObject* sender) {
     AStarSolver::get().stop();
+    m_startButton->setEnabled(true);
+    m_stopButton->setEnabled(false);
+    m_statusLabel->setString("Status: Stopped by user");
+    m_statusLabel->setColor({ 255, 200, 0 });
 }
 
 void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
@@ -235,24 +279,19 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
 
     MacroManager::get().loadMacro(levelID);
 
+    // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (auto playLayer = PlayLayer::get()) {
-        if (auto scene = CCDirector::sharedDirector()->getRunningScene()) {
-            if (auto children = scene->getChildren()) {
-                for (auto* obj : CCArrayExt<CCObject*>(children)) {
-                    if (auto pauseLayer = typeinfo_cast<PauseLayer*>(obj)) {
-                        pauseLayer->onResume(nullptr);
-                        break;
-                    }
-                }
-            }
+        if (playLayer != m_headlessPlayLayer) {
+            playLayer->resetLevel();
+            MacroManager::get().startReplay(playLayer);
+            this->onClose(nullptr);
+            return;
         }
-        playLayer->resume();
-        playLayer->resetLevel();
-        MacroManager::get().startReplay(playLayer);
-        this->onClose(nullptr);
-        return;
     }
 
+    cleanupHeadless();
+
+    // Transition to gameplay scene to watch playback
     auto scene = PlayLayer::scene(m_level, false, false);
     CCDirector::sharedDirector()->pushScene(scene);
 

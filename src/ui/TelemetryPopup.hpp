@@ -3,6 +3,7 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
+#include <Geode/binding/PlayLayer.hpp>
 #include "../solver/AStarSolver.hpp"
 
 namespace solver {
@@ -10,8 +11,8 @@ namespace solver {
 class TelemetryPopup : public geode::Popup {
 public:
     static TelemetryPopup* create(GJGameLevel* level);
-    static inline bool s_launchWithSolver = false;
 
+    ~TelemetryPopup() override;
     void onClose(cocos2d::CCObject* sender) override;
 
 protected:
@@ -22,8 +23,12 @@ protected:
     void onStopSolver(cocos2d::CCObject* sender);
     void onReplayMacro(cocos2d::CCObject* sender);
 
+    void cleanupHeadless();
+
 private:
     GJGameLevel* m_level = nullptr;
+    PlayLayer* m_headlessPlayLayer = nullptr;
+    cocos2d::CCScene* m_headlessScene = nullptr;
 
     cocos2d::CCLabelBMFont* m_statusLabel = nullptr;
     cocos2d::CCLabelBMFont* m_tickLabel = nullptr;
