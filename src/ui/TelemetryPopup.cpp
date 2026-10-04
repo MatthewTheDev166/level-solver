@@ -1,5 +1,6 @@
 #include "TelemetryPopup.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../engine/HeadlessEngine.hpp"
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PauseLayer.hpp>
