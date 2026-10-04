@@ -29,13 +29,13 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
 setup_geode_mod(${PROJECT_NAME})
 
-# Custom post-build deployment to local Geometry Dash mods directory
-if (WIN32)
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+# Custom post-build deployment to local Geometry Dash mods directory (local builds only)
+if (WIN32 AND NOT DEFINED ENV{CI} AND NOT DEFINED ENV{GITHUB_ACTIONS})
+    add_custom_command(TARGET ${PROJECT_NAME}_PACKAGE POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$ENV{LOCALAPPDATA}/GeometryDash/geode/mods"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.geode"
-            "$ENV{LOCALAPPDATA}/GeometryDash/geode/mods/${PROJECT_NAME}.geode"
-        COMMENT "Deploying ${PROJECT_NAME}.geode to %LOCALAPPDATA%/GeometryDash/geode/mods/"
+            "${CMAKE_CURRENT_BINARY_DIR}/matthew.level-solver.geode"
+            "$ENV{LOCALAPPDATA}/GeometryDash/geode/mods/matthew.level-solver.geode"
+        COMMENT "Deploying matthew.level-solver.geode to %LOCALAPPDATA%/GeometryDash/geode/mods/"
     )
 endif()
