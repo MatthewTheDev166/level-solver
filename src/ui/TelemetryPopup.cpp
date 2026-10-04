@@ -287,6 +287,10 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         m_headlessPlayLayer->resetLevel();
         m_headlessPlayLayer->startGame();
         m_headlessPlayLayer->m_isPaused = false;
+        if (m_headlessPlayLayer->m_player1) {
+            m_headlessPlayLayer->moveCameraToPos(m_headlessPlayLayer->m_player1->getPosition());
+            m_headlessPlayLayer->updateVisibility(0.0f);
+        }
     }
 
     if (!m_headlessPlayLayer->m_player1 || !m_headlessPlayLayer->m_objects) {

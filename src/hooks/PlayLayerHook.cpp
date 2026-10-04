@@ -57,6 +57,15 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (solver::HeadlessEngine::get().isHeadless()) {
+            static uint32_t s_deathLogCount = 0;
+            if (++s_deathLogCount <= 50 || (s_deathLogCount % 200 == 0)) {
+                geode::log::warn("[LevelSolver] Simulation death: Object={}, Player=({:.1f}, {:.1f}), yVel={:.2f}",
+                    object ? fmt::format("ID {} ({}) at ({:.1f}, {:.1f})", object->m_objectID, static_cast<int>(object->m_objectType), object->getPositionX(), object->getPositionY()) : "NULL (Camera/Ground/Boundary)",
+                    player ? player->getPositionX() : -1.0f,
+                    player ? player->getPositionY() : -1.0f,
+                    player ? player->m_yVelocity : 0.0
+                );
+            }
             if (player) {
                 player->m_isDead = true;
             }

@@ -57,9 +57,17 @@ void AStarSolver::start(PlayLayer* playLayer) {
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
+    playLayer->m_player1->m_isDead = false;
     playLayer->m_resumeTimer = 0;
     playLayer->m_extraDelta = 0.0;
     playLayer->m_isPaused = false;
+
+    if (playLayer->m_player1->getPositionY() <= 106.0f) {
+        playLayer->m_player1->m_isOnGround = true;
+    }
+
+    playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+    playLayer->updateVisibility(0.0f);
 
     PlayerSnapshot initialSnap;
     initialSnap.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
@@ -291,20 +299,36 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_extraDelta = 0.0;
             playLayer->m_isPaused = false;
 
-            // Apply candidate action via engine handleButton
+            // Apply candidate action via engine handleButton and PlayerObject button state
             if (act == ActionType::Jump) {
                 playLayer->handleButton(true, 1, true);
+                playLayer->m_player1->pushButton(PlayerButton::Jump);
             } else {
                 playLayer->handleButton(false, 1, true);
+                playLayer->m_player1->releaseButton(PlayerButton::Jump);
             }
 
             // Headless fixed-step physics advance
             playLayer->update(HeadlessEngine::FIXED_DT);
             stepsDone++;
 
+            // Synchronize camera & quad-tree visibility to prevent out-of-bounds deaths
+            playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+            playLayer->updateVisibility(HeadlessEngine::FIXED_DT);
+
             // If player died, backtrack
             if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                if (current.snapshot.tick <= 10) {
+                    geode::log::warn("[LevelSolver] Step death at tick {} (act={}): pos=({:.1f}, {:.1f}), yVel={:.2f}",
+                        current.snapshot.tick,
+                        act == ActionType::Jump ? "Jump" : "None",
+                        playLayer->m_player1->getPositionX(),
+                        playLayer->m_player1->getPositionY(),
+                        playLayer->m_player1->m_yVelocity
+                    );
+                }
                 playLayer->handleButton(false, 1, true);
+                playLayer->m_player1->releaseButton(PlayerButton::Jump);
                 playLayer->m_playerDied = false;
                 playLayer->m_player1->m_isDead = false;
                 continue;
@@ -365,7 +389,11 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     if (m_openQueue.empty() && m_isRunning && !m_isCompleted) {
         m_isRunning = false;
         m_telemetry.status = SolverStatus::Failed;
-        m_telemetry.detailMessage = fmt::format("Search space exhausted at X={:.0f} (no surviving path)", m_maxReachedX);
+        if (m_maxReachedX <= m_startX + 1.0f) {
+            m_telemetry.detailMessage = fmt::format("Search space exhausted at spawn X={:.0f} (no surviving path)", m_maxReachedX);
+        } else {
+            m_telemetry.detailMessage = fmt::format("Search space exhausted at X={:.0f} (no surviving path)", m_maxReachedX);
+        }
         HeadlessEngine::get().disableHeadless();
         HazardDetector::clearIndex();
         CheatAPIIntegrator::notifyCheatEnded();

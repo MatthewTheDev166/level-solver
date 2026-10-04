@@ -1,5 +1,6 @@
 #include "ActionQuantizer.hpp"
 #include "HazardDetector.hpp"
+#include <cmath>
 
 namespace solver {
 
@@ -36,7 +37,10 @@ std::vector<ActionType> ActionQuantizer::getCandidateActions(
     }
 
     // Discrete modes: Cube, Ball, UFO, Spider, Robot
-    bool isGrounded = player->m_isOnGround || player->m_isOnGround2 || player->m_isOnGround3 || player->m_isOnGround4;
+    // Recognize grounded state including initial spawn tick 0 and ground baseline settling
+    bool isGrounded = player->m_isOnGround || player->m_isOnGround2 || player->m_isOnGround3 || player->m_isOnGround4 ||
+                      (currentTick == 0) ||
+                      (std::abs(player->m_yVelocity) < 0.05 && player->getPositionY() <= 106.0f);
     bool isNearOrbOrPad = HazardDetector::isNearInteractable(player->getPosition(), objects) ||
                           player->m_touchedRing || player->m_touchedPad;
 
