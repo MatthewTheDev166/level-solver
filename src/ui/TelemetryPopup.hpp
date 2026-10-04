@@ -4,7 +4,7 @@
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/PlayLayer.hpp>
-#include "../solver/AStarSolver.hpp"
+#include "../solver/SwarmSolver.hpp"
 
 namespace solver {
 
@@ -32,10 +32,10 @@ private:
     cocos2d::CCScene* m_headlessScene = nullptr;
 
     cocos2d::CCLabelBMFont* m_statusLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_tickLabel = nullptr;
     cocos2d::CCLabelBMFont* m_horizonLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_openNodesLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_prunedStatesLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_waveLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_populationLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_backtrackLabel = nullptr;
     cocos2d::CCLabelBMFont* m_memoryLabel = nullptr;
     cocos2d::CCLabelBMFont* m_throughputLabel = nullptr;
     cocos2d::CCLabelBMFont* m_macroStatusLabel = nullptr;

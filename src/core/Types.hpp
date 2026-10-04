@@ -53,6 +53,11 @@ struct TelemetryMetrics {
     size_t memoryFootprintBytes = 0;
     size_t nearbyObstacles = 0;
     float ticksPerSecond = 0.0f;
+    uint32_t activeWave = 0;
+    size_t populationSize = 100;
+    size_t survivorCount = 0;
+    size_t checkpointDepth = 0;
+    size_t backtrackCount = 0;
     SolverStatus status = SolverStatus::Idle;
     std::string detailMessage = "Ready";
 };
@@ -182,6 +187,25 @@ struct SearchNode {
         // Max-priority queue: higher fScore has higher priority
         return fScore < other.fScore;
     }
+};
+
+struct SwarmBot {
+    std::vector<TickAction> segmentActions; // Input timeline for this segment
+    float finalX = 0.0f;
+    uint32_t deathTick = 0;
+    bool survived = false;
+    float clearance = 100.0f;
+    float fitnessScore = 0.0f;
+};
+
+struct BeamCheckpoint {
+    PlayerSnapshot snapshot;              // Native physics snapshot at segment start
+    uint32_t startTick = 0;               // Starting tick of this checkpoint
+    float startX = 0.0f;                  // X coordinate at segment start
+    std::vector<TickAction> macroHistory; // Global inputs accumulated to this point
+    std::vector<SwarmBot> runnerUps;      // Top alternate surviving paths
+    uint32_t runnerUpIndex = 0;           // Currently tested alternate branch
+    uint32_t failedWaves = 0;             // Consecutive failed generations
 };
 
 } // namespace solver

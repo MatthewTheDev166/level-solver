@@ -141,9 +141,11 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
         const auto& act = m_actions[m_playbackIndex];
         if (act.pressed && !m_lastButtonState) {
             playLayer->handleButton(true, 1, true);
+            playLayer->m_player1->pushButton(PlayerButton::Jump);
             m_lastButtonState = true;
         } else if (!act.pressed && m_lastButtonState) {
             playLayer->handleButton(false, 1, true);
+            playLayer->m_player1->releaseButton(PlayerButton::Jump);
             m_lastButtonState = false;
         }
         m_playbackIndex++;

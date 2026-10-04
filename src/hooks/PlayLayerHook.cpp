@@ -5,6 +5,7 @@
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../engine/HeadlessEngine.hpp"
 #include "../solver/AStarSolver.hpp"
+#include "../solver/SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../ui/TelemetryPopup.hpp"
 
@@ -57,6 +58,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (solver::HeadlessEngine::get().isHeadless()) {
+            // RobTop's initial spawn anti-cheat spike (Object ID 8 at X <= 10) must not kill headless simulation
+            if (object && object->m_objectID == 8 && object->getPositionX() <= 10.0f) {
+                return;
+            }
             static uint32_t s_deathLogCount = 0;
             if (++s_deathLogCount <= 50 || (s_deathLogCount % 200 == 0)) {
                 geode::log::warn("[LevelSolver] Simulation death: Object={}, Player=({:.1f}, {:.1f}), yVel={:.2f}",
@@ -84,6 +89,9 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
+        if (solver::SwarmSolver::get().isRunning()) {
+            solver::SwarmSolver::get().stop();
+        }
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();
         }
