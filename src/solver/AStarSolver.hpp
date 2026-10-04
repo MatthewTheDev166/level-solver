@@ -20,6 +20,7 @@ public:
     static AStarSolver& get();
 
     void start(PlayLayer* playLayer);
+    void resume(PlayLayer* playLayer);
     void stop();
     void reset();
 

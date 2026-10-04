@@ -10,6 +10,9 @@ namespace solver {
 class TelemetryPopup : public geode::Popup {
 public:
     static TelemetryPopup* create(GJGameLevel* level);
+    static inline bool s_launchWithSolver = false;
+
+    void onClose(cocos2d::CCObject* sender) override;
 
 protected:
     bool init(float width, float height, GJGameLevel* level);

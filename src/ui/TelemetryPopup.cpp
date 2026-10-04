@@ -2,6 +2,7 @@
 #include "../replay/MacroManager.hpp"
 #include <Geode/binding/GameLevelManager.hpp>
 #include <Geode/binding/PlayLayer.hpp>
+#include <Geode/binding/PauseLayer.hpp>
 
 using namespace geode::prelude;
 
@@ -164,29 +165,57 @@ void TelemetryPopup::update(float dt) {
     // Throughput
     m_throughputLabel->setString(fmt::format("Simulation Rate: {:.0f} ticks/sec", telemetry.ticksPerSecond).c_str());
 
+    // Macro status
+    int levelID = m_level ? m_level->m_levelID.value() : 0;
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID) || AStarSolver::get().isCompleted();
+    if (m_macroStatusLabel) {
+        m_macroStatusLabel->setString(hasSavedMacro ? "Saved Macro: Available on Disk" : "Saved Macro: None Found");
+        m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
+    }
+
     // Button states
     bool isSearching = AStarSolver::get().isRunning();
     m_startButton->setEnabled(!isSearching);
     m_stopButton->setEnabled(isSearching);
+    m_replayButton->setEnabled(hasSavedMacro && !isSearching);
+}
+
+void TelemetryPopup::onClose(cocos2d::CCObject* sender) {
+    if (AStarSolver::get().isRunning()) {
+        AStarSolver::get().stop();
+    }
+    Popup::onClose(sender);
 }
 
 void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
     if (!m_level) return;
 
     if (auto playLayer = PlayLayer::get()) {
-        AStarSolver::get().start(playLayer);
+        // If inside PauseLayer or gameplay is paused, resume
+        if (auto scene = CCDirector::sharedDirector()->getRunningScene()) {
+            if (auto children = scene->getChildren()) {
+                for (auto* obj : CCArrayExt<CCObject*>(children)) {
+                    if (auto pauseLayer = typeinfo_cast<PauseLayer*>(obj)) {
+                        pauseLayer->onResume(nullptr);
+                        break;
+                    }
+                }
+            }
+        }
+        playLayer->resume();
+
+        if (AStarSolver::get().getTelemetry().status == SolverStatus::Paused) {
+            AStarSolver::get().resume(playLayer);
+        } else {
+            AStarSolver::get().start(playLayer);
+        }
         return;
     }
 
-    // Launch PlayLayer and initiate search
+    // Launch PlayLayer and set flag to display TelemetryPopup overlay on top of PlayLayer
+    s_launchWithSolver = true;
     auto scene = PlayLayer::scene(m_level, false, false);
     CCDirector::sharedDirector()->pushScene(scene);
-
-    geode::Loader::get()->queueInMainThread([this]() {
-        if (auto playLayer = PlayLayer::get()) {
-            AStarSolver::get().start(playLayer);
-        }
-    });
 
     this->onClose(nullptr);
 }
@@ -207,6 +236,17 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     MacroManager::get().loadMacro(levelID);
 
     if (auto playLayer = PlayLayer::get()) {
+        if (auto scene = CCDirector::sharedDirector()->getRunningScene()) {
+            if (auto children = scene->getChildren()) {
+                for (auto* obj : CCArrayExt<CCObject*>(children)) {
+                    if (auto pauseLayer = typeinfo_cast<PauseLayer*>(obj)) {
+                        pauseLayer->onResume(nullptr);
+                        break;
+                    }
+                }
+            }
+        }
+        playLayer->resume();
         playLayer->resetLevel();
         MacroManager::get().startReplay(playLayer);
         this->onClose(nullptr);

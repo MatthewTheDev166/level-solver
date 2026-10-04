@@ -68,6 +68,23 @@ void AStarSolver::start(PlayLayer* playLayer) {
     geode::log::info("[LevelSolver] Solver started at X={}, target end X={}", m_startX, m_levelLength);
 }
 
+void AStarSolver::resume(PlayLayer* playLayer) {
+    if (!playLayer || !playLayer->m_player1 || m_openQueue.empty()) {
+        start(playLayer);
+        return;
+    }
+
+    m_isRunning = true;
+    HazardDetector::buildIndex(playLayer->m_objects);
+    DeterministicPRNG::clampSeed();
+    CheatAPIIntegrator::notifyCheatStarted();
+    HeadlessEngine::get().enableHeadless();
+
+    m_telemetry.status = SolverStatus::Searching;
+    m_telemetry.detailMessage = "A* Search in progress...";
+    geode::log::info("[LevelSolver] Solver resumed with {} open nodes", m_openQueue.size());
+}
+
 void AStarSolver::stop() {
     if (m_isRunning) {
         m_isRunning = false;

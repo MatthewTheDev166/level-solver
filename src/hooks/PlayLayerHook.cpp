@@ -6,6 +6,7 @@
 #include "../engine/HeadlessEngine.hpp"
 #include "../solver/AStarSolver.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../ui/TelemetryPopup.hpp"
 
 using namespace geode::prelude;
 
@@ -37,6 +38,20 @@ class $modify(SolverPlayLayer, PlayLayer) {
             if (solver::MacroManager::get().hasMacro(levelID)) {
                 solver::MacroManager::get().loadMacro(levelID);
             }
+        }
+
+        // If launched in solver mode, show TelemetryPopup overlay and start solver
+        if (solver::TelemetryPopup::s_launchWithSolver) {
+            solver::TelemetryPopup::s_launchWithSolver = false;
+            geode::Loader::get()->queueInMainThread([this, level]() {
+                if (auto playLayer = PlayLayer::get()) {
+                    auto popup = solver::TelemetryPopup::create(level);
+                    if (popup) {
+                        popup->show();
+                    }
+                    solver::AStarSolver::get().start(playLayer);
+                }
+            });
         }
 
         return true;
@@ -85,6 +100,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
+        solver::TelemetryPopup::s_launchWithSolver = false;
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();
         }
