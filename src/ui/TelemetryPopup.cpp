@@ -9,7 +9,7 @@ namespace solver {
 
 TelemetryPopup* TelemetryPopup::create(GJGameLevel* level) {
     auto ret = new TelemetryPopup();
-    if (ret && ret->initAnchored(420.0f, 290.0f, level)) {
+    if (ret && ret->init(420.0f, 290.0f, level)) {
         ret->autorelease();
         return ret;
     }
@@ -17,7 +17,11 @@ TelemetryPopup* TelemetryPopup::create(GJGameLevel* level) {
     return nullptr;
 }
 
-bool TelemetryPopup::setup(GJGameLevel* level) {
+bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
+    if (!Popup::init(width, height)) {
+        return false;
+    }
+
     m_level = level;
     this->setTitle("Level Solver Telemetry");
 

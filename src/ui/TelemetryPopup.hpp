@@ -10,12 +10,12 @@ using namespace alpha::prelude;
 
 namespace solver {
 
-class TelemetryPopup : public geode::Popup<GJGameLevel*> {
+class TelemetryPopup : public geode::Popup {
 public:
     static TelemetryPopup* create(GJGameLevel* level);
 
 protected:
-    bool setup(GJGameLevel* level) override;
+    bool init(float width, float height, GJGameLevel* level);
     void update(float dt) override;
 
     void onStartSolver(cocos2d::CCObject* sender);
