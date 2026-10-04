@@ -53,6 +53,10 @@ void SwarmSolver::start(PlayLayer* playLayer) {
         playLayer->m_player1->m_isOnGround = true;
     }
 
+    if (playLayer->m_anticheatSpike) {
+        playLayer->m_anticheatSpike->setPosition({-9999.0f, -9999.0f});
+    }
+
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
     playLayer->updateVisibility(0.0f);
 
@@ -445,22 +449,27 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     } else {
         // No survivors in this wave
         currentCp.failedWaves++;
-        geode::log::warn("[LevelSolver] Wave wiped out at X={:.1f} (strike {}/3)", currentCp.startX, currentCp.failedWaves);
+        geode::log::warn("[LevelSolver] Wave wiped out at X={:.1f} (strike {}/10)", currentCp.startX, currentCp.failedWaves);
 
-        if (currentCp.failedWaves >= 3) {
-            // Dead-end detected: Backtrack!
-            m_backtrackCount++;
-            geode::log::warn("[LevelSolver] Backtracking from dead-end at X={:.1f}", currentCp.startX);
+        if (currentCp.failedWaves >= 10) {
+            if (m_checkpointStack.size() > 1) {
+                // Dead-end detected on higher checkpoint: Backtrack to parent!
+                m_backtrackCount++;
+                geode::log::warn("[LevelSolver] Backtracking from dead-end at X={:.1f}", currentCp.startX);
 
-            m_checkpointStack.pop_back();
+                m_checkpointStack.pop_back();
 
-            if (!m_checkpointStack.empty()) {
-                auto& parentCp = m_checkpointStack.back();
-                if (parentCp.runnerUpIndex + 1 < parentCp.runnerUps.size()) {
-                    parentCp.runnerUpIndex++;
-                    parentCp.failedWaves = 0;
-                    geode::log::info("[LevelSolver] Activating runner-up #{} at X={:.1f}", parentCp.runnerUpIndex + 1, parentCp.startX);
+                if (!m_checkpointStack.empty()) {
+                    auto& parentCp = m_checkpointStack.back();
+                    if (parentCp.runnerUpIndex + 1 < parentCp.runnerUps.size()) {
+                        parentCp.runnerUpIndex++;
+                        parentCp.failedWaves = 0;
+                        geode::log::info("[LevelSolver] Activating runner-up #{} at X={:.1f}", parentCp.runnerUpIndex + 1, parentCp.startX);
+                    }
                 }
+            } else {
+                // At root checkpoint (0%): keep attempting fresh mutations
+                currentCp.failedWaves = 0;
             }
         }
     }

@@ -58,8 +58,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
         if (solver::HeadlessEngine::get().isHeadless()) {
-            // RobTop's initial spawn anti-cheat spike (Object ID 8 at X <= 10) must not kill headless simulation
-            if (object && object->m_objectID == 8 && object->getPositionX() <= 10.0f) {
+            // RobTop's initial spawn anti-cheat spike (m_anticheatSpike / Object ID 8 at X <= 30.0) must not kill headless simulation
+            if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
                 return;
             }
             static uint32_t s_deathLogCount = 0;
