@@ -134,6 +134,10 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
 
 void TelemetryPopup::update(float dt) {
+    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
+        eglView->showCursor(true);
+    }
+
     // If running in background, advance headless swarm search batch
     if (SwarmSolver::get().isRunning() && m_headlessPlayLayer) {
         ActiveLayerScope scope(m_headlessPlayLayer);
@@ -232,6 +236,9 @@ void TelemetryPopup::cleanupHeadless() {
         m_headlessScene = nullptr;
     }
     HeadlessEngine::get().disableHeadless();
+    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
+        eglView->showCursor(true);
+    }
 }
 
 void TelemetryPopup::onClose(cocos2d::CCObject* sender) {
@@ -293,6 +300,11 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
             m_headlessPlayLayer->moveCameraToPos(m_headlessPlayLayer->m_player1->getPosition());
             m_headlessPlayLayer->updateVisibility(0.0f);
         }
+    }
+
+    // Force cursor to stay visible after startGame() hides it
+    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
+        eglView->showCursor(true);
     }
 
     if (!m_headlessPlayLayer->m_player1 || !m_headlessPlayLayer->m_objects) {

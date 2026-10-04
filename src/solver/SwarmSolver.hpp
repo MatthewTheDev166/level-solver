@@ -50,6 +50,9 @@ private:
     // Commit a solution upon reaching 100%
     void finalizeSolution(const std::vector<TickAction>& winningActions);
 
+    // True beam backtracking to parent or runner-up
+    void handleBacktrack(PlayLayer* playLayer);
+
     bool m_isRunning = false;
     bool m_isCompleted = false;
     int m_levelID = 0;
@@ -68,6 +71,12 @@ private:
     uint32_t m_backtrackCount = 0;
     size_t m_currentPopulationSize = 100;
     size_t m_lastSurvivorCount = 0;
+
+    // Stateful population evaluation across frame budgets
+    std::vector<SwarmBot> m_activePopulation;
+    size_t m_currentBotIndex = 0;
+    std::vector<SwarmBot> m_currentWaveSurvivors;
+    uint32_t m_currentHorizonTicks = 0;
 
     TelemetryMetrics m_telemetry;
 };
