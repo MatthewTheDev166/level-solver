@@ -8,7 +8,7 @@ namespace solver {
 class HeadlessEngine {
 public:
     static constexpr float FIXED_DT = 1.0f / 240.0f;
-    static constexpr uint32_t DEFAULT_BATCH_TICKS = 5000;
+    static constexpr uint32_t DEFAULT_BATCH_TICKS = 600;
 
     static HeadlessEngine& get();
 

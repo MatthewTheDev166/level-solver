@@ -12,6 +12,7 @@ MacroManager& MacroManager::get() {
 
 void MacroManager::clear() {
     m_actions.clear();
+    m_accumulatedTime = 0.0f;
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_isReplaying = false;
@@ -109,6 +110,7 @@ void MacroManager::startReplay(PlayLayer* playLayer) {
     if (!playLayer || m_actions.empty()) return;
 
     m_isReplaying = true;
+    m_accumulatedTime = 0.0f;
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
@@ -129,21 +131,20 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     }
 }
 
-void MacroManager::updateReplay(PlayLayer* playLayer) {
+void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
     if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
 
-    m_playbackTick++;
+    m_accumulatedTime += dt;
+    m_playbackTick = static_cast<uint32_t>(std::round(m_accumulatedTime * 240.0f));
 
     while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
         const auto& act = m_actions[m_playbackIndex];
-        if (act.tick == m_playbackTick) {
-            if (act.pressed && !m_lastButtonState) {
-                playLayer->m_player1->pushButton(PlayerButton::Jump);
-                m_lastButtonState = true;
-            } else if (!act.pressed && m_lastButtonState) {
-                playLayer->m_player1->releaseButton(PlayerButton::Jump);
-                m_lastButtonState = false;
-            }
+        if (act.pressed && !m_lastButtonState) {
+            playLayer->m_player1->pushButton(PlayerButton::Jump);
+            m_lastButtonState = true;
+        } else if (!act.pressed && m_lastButtonState) {
+            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            m_lastButtonState = false;
         }
         m_playbackIndex++;
     }

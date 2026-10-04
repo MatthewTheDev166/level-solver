@@ -45,7 +45,10 @@ enum class SolverStatus {
 struct TelemetryMetrics {
     uint32_t currentTick = 0;
     float explorationHorizon = 0.0f; // 0.0 to 100.0%
+    float currentX = 0.0f;
+    float targetEndX = 0.0f;
     size_t openNodes = 0;
+    size_t exploredNodes = 0;
     size_t prunedStates = 0;
     size_t memoryFootprintBytes = 0;
     size_t nearbyObstacles = 0;
@@ -59,8 +62,9 @@ struct PlayerSnapshot {
     double yVelocity = 0.0;
     double fallSpeed = 0.0;
     float rotation = 0.0f;
-    float rotationRate = 0.0f;
     float vehicleSize = 1.0f;
+    float playerSpeed = 1.0f;
+    double gravity = 1.0;
     VehicleMode mode = VehicleMode::Cube;
 
     bool isUpsideDown = false;
@@ -74,6 +78,7 @@ struct PlayerSnapshot {
     bool touchedPad = false;
     bool isDashing = false;
     bool isDead = false;
+    bool isHolding = false;
 
     uint32_t tick = 0;
     uint32_t rngSeed = 1337;
@@ -97,6 +102,8 @@ struct PlayerSnapshot {
         fallSpeed = player->m_fallSpeed;
         rotation = player->getRotation();
         vehicleSize = player->m_vehicleSize;
+        playerSpeed = player->m_playerSpeed;
+        gravity = player->m_gravity;
         mode = detectMode(player);
 
         isUpsideDown = player->m_isUpsideDown;
@@ -110,6 +117,7 @@ struct PlayerSnapshot {
         touchedPad = player->m_touchedPad;
         isDashing = player->m_isDashing;
         isDead = player->m_isDead;
+        isHolding = player->buttonDown(PlayerButton::Jump);
 
         tick = currentTick;
         rngSeed = currentSeed;
@@ -122,6 +130,22 @@ struct PlayerSnapshot {
         player->m_fallSpeed = fallSpeed;
         player->setRotation(rotation);
         player->m_vehicleSize = vehicleSize;
+        player->m_playerSpeed = playerSpeed;
+        player->m_gravity = gravity;
+
+        if (vehicleSize < 0.9f) {
+            player->togglePlayerScale(true, true);
+        } else {
+            player->togglePlayerScale(false, true);
+        }
+
+        if (player->m_isShip != (mode == VehicleMode::Ship)) player->toggleFlyMode(mode == VehicleMode::Ship, true);
+        if (player->m_isBall != (mode == VehicleMode::Ball)) player->toggleRollMode(mode == VehicleMode::Ball, true);
+        if (player->m_isBird != (mode == VehicleMode::UFO)) player->toggleBirdMode(mode == VehicleMode::UFO, true);
+        if (player->m_isDart != (mode == VehicleMode::Wave)) player->toggleDartMode(mode == VehicleMode::Wave, true);
+        if (player->m_isRobot != (mode == VehicleMode::Robot)) player->toggleRobotMode(mode == VehicleMode::Robot, true);
+        if (player->m_isSpider != (mode == VehicleMode::Spider)) player->toggleSpiderMode(mode == VehicleMode::Spider, true);
+        if (player->m_isSwing != (mode == VehicleMode::Swing)) player->toggleSwingMode(mode == VehicleMode::Swing, true);
 
         player->m_isUpsideDown = isUpsideDown;
         player->m_isOnGround = isOnGround;
@@ -133,7 +157,13 @@ struct PlayerSnapshot {
         player->m_touchedRing = touchedRing;
         player->m_touchedPad = touchedPad;
         player->m_isDashing = isDashing;
-        player->m_isDead = false; // Reset death on backtrack
+        player->m_isDead = false;
+
+        if (isHolding) {
+            player->pushButton(PlayerButton::Jump);
+        } else {
+            player->releaseButton(PlayerButton::Jump);
+        }
     }
 };
 
@@ -142,7 +172,7 @@ struct SearchNode {
     float gScore = 0.0f; // Traveled progress / cost
     float fScore = 0.0f; // Priority heuristic score
     float hazardClearance = 100.0f; // Distance to nearest hazard
-    uint32_t parentIndex = 0;
+    uint32_t parentIndex = UINT32_MAX;
     ActionType action = ActionType::None;
     uint32_t actionSwitches = 0;
     uint32_t holdDuration = 0;

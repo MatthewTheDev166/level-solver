@@ -23,7 +23,7 @@ public:
 
     void startReplay(PlayLayer* playLayer);
     void stopReplay(PlayLayer* playLayer);
-    void updateReplay(PlayLayer* playLayer);
+    void updateReplay(PlayLayer* playLayer, float dt);
     bool isReplaying() const;
 
     uint32_t getCurrentPlaybackTick() const;
@@ -33,9 +33,11 @@ private:
 
     std::vector<TickAction> m_actions;
     bool m_isReplaying = false;
+    float m_accumulatedTime = 0.0f;
     uint32_t m_playbackTick = 0;
     size_t m_playbackIndex = 0;
     bool m_lastButtonState = false;
+
 };
 
 } // namespace solver

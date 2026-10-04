@@ -3,19 +3,16 @@
 #include <Geode/Geode.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
-#include <alphalaneous.alphas-ui-pack/include/API.hpp>
 #include "../solver/AStarSolver.hpp"
-
-using namespace alpha::prelude;
 
 namespace solver {
 
-class TelemetryPopup : public geode::Popup {
+class TelemetryPopup : public geode::Popup<GJGameLevel*> {
 public:
     static TelemetryPopup* create(GJGameLevel* level);
 
 protected:
-    bool init(float width, float height, GJGameLevel* level);
+    bool setup(GJGameLevel* level) override;
     void update(float dt) override;
 
     void onStartSolver(cocos2d::CCObject* sender);
@@ -24,8 +21,6 @@ protected:
 
 private:
     GJGameLevel* m_level = nullptr;
-    AdvancedScrollLayer* m_scrollLayer = nullptr;
-    TouchBlocker* m_touchBlocker = nullptr;
 
     cocos2d::CCLabelBMFont* m_statusLabel = nullptr;
     cocos2d::CCLabelBMFont* m_tickLabel = nullptr;

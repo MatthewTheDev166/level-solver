@@ -1,5 +1,6 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/FMODAudioEngine.hpp>
 #include "../core/DeterministicPRNG.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../engine/HeadlessEngine.hpp"
@@ -8,7 +9,20 @@
 
 using namespace geode::prelude;
 
+class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
+    void playEffect(gd::string path, float speed, float p2, float volume) {
+        if (solver::HeadlessEngine::get().isAudioSuppressed()) {
+            return;
+        }
+        FMODAudioEngine::playEffect(path, speed, p2, volume);
+    }
+};
+
 class $modify(SolverPlayLayer, PlayLayer) {
+    struct Fields {
+        bool m_isSteppingHeadless = false;
+    };
+
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) {
             return false;
@@ -29,18 +43,37 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void update(float dt) {
-        // If autonomous forward state search is active, execute headless batch
-        if (solver::AStarSolver::get().isRunning()) {
-            solver::AStarSolver::get().stepSearchBatch(this, solver::HeadlessEngine::get().getBatchSize());
+        // Re-entrancy guard: if update() was triggered inside stepSearchBatch,
+        // pass directly to game physics without re-triggering stepSearchBatch
+        if (m_fields->m_isSteppingHeadless) {
+            PlayLayer::update(dt);
             return;
         }
 
-        // If macro replay is active, dispatch recorded inputs
+        // If autonomous forward state search is active, execute headless batch
+        if (solver::AStarSolver::get().isRunning()) {
+            m_fields->m_isSteppingHeadless = true;
+            solver::AStarSolver::get().stepSearchBatch(this, solver::HeadlessEngine::get().getBatchSize());
+            m_fields->m_isSteppingHeadless = false;
+            return;
+        }
+
+        // If macro replay is active, dispatch recorded inputs synchronized to delta time
         if (solver::MacroManager::get().isReplaying()) {
-            solver::MacroManager::get().updateReplay(this);
+            solver::MacroManager::get().updateReplay(this, dt);
         }
 
         PlayLayer::update(dt);
+    }
+
+    void destroyPlayer(PlayerObject* player, GameObject* object) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            if (player) {
+                player->m_isDead = true;
+            }
+            return;
+        }
+        PlayLayer::destroyPlayer(player, object);
     }
 
     void visit() {
@@ -64,10 +97,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void resetLevel() {
+        PlayLayer::resetLevel();
         // If replaying macro, restart playback
         if (solver::MacroManager::get().isReplaying()) {
             solver::MacroManager::get().startReplay(this);
         }
-        PlayLayer::resetLevel();
     }
 };

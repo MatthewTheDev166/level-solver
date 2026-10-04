@@ -49,8 +49,8 @@ std::vector<ActionType> ActionQuantizer::getCandidateActions(
     }
 
     if (mode == VehicleMode::Robot) {
-        // Robot can hold jump while grounded or within 12 ticks of takeoff
-        if (isGrounded || (currentAction == ActionType::Jump && currentHoldTicks < 12)) {
+        // Robot can hold jump while grounded or within 60 ticks (~0.25s at 240 TPS) of takeoff
+        if (isGrounded || (currentAction == ActionType::Jump && currentHoldTicks < 60)) {
             return { ActionType::None, ActionType::Jump };
         }
         if (isNearOrbOrPad) {
