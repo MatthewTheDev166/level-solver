@@ -210,6 +210,9 @@ void TelemetryPopup::cleanupHeadless() {
         AStarSolver::get().stop();
     }
     if (m_headlessPlayLayer) {
+        if (GameManager::sharedState()->m_playLayer == m_headlessPlayLayer) {
+            GameManager::sharedState()->m_playLayer = m_previousPlayLayer;
+        }
         m_headlessPlayLayer->removeFromParentAndCleanup(true);
         m_headlessPlayLayer->release();
         m_headlessPlayLayer = nullptr;
@@ -233,6 +236,9 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
 
     cleanupHeadless();
 
+    // Cache the previous active PlayLayer (e.g. if opened from PauseLayer, or nullptr if from menu)
+    m_previousPlayLayer = GameManager::sharedState()->m_playLayer;
+
     // Enable headless engine and silence audio before initializing PlayLayer
     HeadlessEngine::get().enableHeadless();
 
@@ -248,9 +254,43 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         return;
     }
 
+    // Immediately restore GameManager's active PlayLayer to prevent dangling pointers
+    // in other mods (e.g. BetterInfo, Attempt Playback)
+    GameManager::sharedState()->m_playLayer = m_previousPlayLayer;
+
     m_headlessPlayLayer->retain();
     m_headlessScene->addChild(m_headlessPlayLayer);
     m_headlessPlayLayer->m_isSilent = true;
+
+    // Disable all input reception on headless layer to avoid intercepting user keys/clicks
+    m_headlessPlayLayer->setKeypadEnabled(false);
+    m_headlessPlayLayer->setTouchEnabled(false);
+    m_headlessPlayLayer->setMouseEnabled(false);
+
+    // Complete object creation synchronously if chunked across frames
+    int safetyLimit = 10000;
+    while (m_headlessPlayLayer->m_loadingProgress < 1.0f && --safetyLimit > 0) {
+        m_headlessPlayLayer->processCreateObjectsFromSetup();
+    }
+
+    // Finalize level setup and spawn player at start position (or StartPos)
+    m_headlessPlayLayer->setupHasCompleted();
+    m_headlessPlayLayer->resetLevel();
+    m_headlessPlayLayer->startGame();
+    m_headlessPlayLayer->m_isPaused = false;
+
+    if (!m_headlessPlayLayer->m_player1 || !m_headlessPlayLayer->m_objects) {
+        cleanupHeadless();
+        m_statusLabel->setString("Status: Error - Level setup incomplete");
+        m_statusLabel->setColor({ 255, 60, 60 });
+        return;
+    }
+
+    geode::log::info("[LevelSolver] Headless PlayLayer ready. Object count: {}, Player pos: ({}, {})",
+        m_headlessPlayLayer->m_objects ? m_headlessPlayLayer->m_objects->count() : 0,
+        m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPositionX() : -1.0f,
+        m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPositionY() : -1.0f
+    );
 
     // Start solver on the headless playLayer
     AStarSolver::get().start(m_headlessPlayLayer);
@@ -281,13 +321,11 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     MacroManager::get().loadMacro(levelID);
 
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
-    if (auto playLayer = PlayLayer::get()) {
-        if (playLayer != m_headlessPlayLayer) {
-            playLayer->resetLevel();
-            MacroManager::get().startReplay(playLayer);
-            this->onClose(nullptr);
-            return;
-        }
+    if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
+        m_previousPlayLayer->resetLevel();
+        MacroManager::get().startReplay(m_previousPlayLayer);
+        this->onClose(nullptr);
+        return;
     }
 
     cleanupHeadless();
@@ -296,7 +334,7 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     auto scene = PlayLayer::scene(m_level, false, false);
     CCDirector::sharedDirector()->pushScene(scene);
 
-    geode::Loader::get()->queueInMainThread([this]() {
+    geode::Loader::get()->queueInMainThread([]() {
         if (auto playLayer = PlayLayer::get()) {
             MacroManager::get().startReplay(playLayer);
         }

@@ -48,6 +48,7 @@ void AStarSolver::start(PlayLayer* playLayer) {
     playLayer->m_playerDied = false;
     playLayer->m_resumeTimer = 0;
     playLayer->m_extraDelta = 0.0;
+    playLayer->m_isPaused = false;
 
     PlayerSnapshot initialSnap;
     initialSnap.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
@@ -91,6 +92,7 @@ void AStarSolver::resume(PlayLayer* playLayer) {
     playLayer->m_playerDied = false;
     playLayer->m_resumeTimer = 0;
     playLayer->m_extraDelta = 0.0;
+    playLayer->m_isPaused = false;
 
     m_telemetry.status = SolverStatus::Searching;
     m_telemetry.detailMessage = "A* Search in progress...";
@@ -200,7 +202,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
         m_openQueue.pop();
 
         // Check if level solved (100%)
-        if (current.snapshot.position.x >= m_levelLength) {
+        if (current.snapshot.position.x >= m_levelLength || playLayer->m_hasCompletedLevel) {
             m_isCompleted = true;
             m_isRunning = false;
             m_telemetry.status = SolverStatus::Solved;
@@ -247,6 +249,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_playerDied = false;
             playLayer->m_resumeTimer = 0;
             playLayer->m_extraDelta = 0.0;
+            playLayer->m_isPaused = false;
 
             // Apply candidate action
             if (act == ActionType::Jump) {
@@ -263,6 +266,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
                 playLayer->m_player1->releaseButton(PlayerButton::Jump);
                 playLayer->m_playerDied = false;
+                playLayer->m_player1->m_isDead = false;
                 continue;
             }
 

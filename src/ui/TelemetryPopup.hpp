@@ -28,6 +28,7 @@ protected:
 private:
     GJGameLevel* m_level = nullptr;
     PlayLayer* m_headlessPlayLayer = nullptr;
+    PlayLayer* m_previousPlayLayer = nullptr;
     cocos2d::CCScene* m_headlessScene = nullptr;
 
     cocos2d::CCLabelBMFont* m_statusLabel = nullptr;

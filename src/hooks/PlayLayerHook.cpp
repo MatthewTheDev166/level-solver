@@ -60,6 +60,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
             if (player) {
                 player->m_isDead = true;
             }
+            this->m_playerDied = true;
             return;
         }
         PlayLayer::destroyPlayer(player, object);
