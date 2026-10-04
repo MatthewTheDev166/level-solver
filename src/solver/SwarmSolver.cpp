@@ -3,6 +3,7 @@
 #include "../core/DeterministicPRNG.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../replay/GDRExporter.hpp"
 #include <chrono>
 #include <algorithm>
 #include <random>
@@ -187,6 +188,12 @@ void SwarmSolver::finalizeSolution(const std::vector<TickAction>& winningActions
 
     MacroManager::get().setActions(m_resolvedMacro);
     MacroManager::get().saveMacro(m_levelID, m_levelName);
+
+    // Export native Mega Hack GDR2 (.gdr2) and GDR JSON (.json)
+    auto exportRes = GDRExporter::exportReplays(m_levelName, m_levelID, m_resolvedMacro);
+    if (exportRes.success) {
+        geode::log::info("[LevelSolver] Exported Mega Hack macro to: {}", exportRes.gdr2Path.string());
+    }
 
     HeadlessEngine::get().disableHeadless();
     HazardDetector::clearIndex();

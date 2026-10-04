@@ -162,6 +162,15 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
 void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
     if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
 
+    // Do NOT tick or burn macro actions while the level is still fading in / loading!
+    if (!playLayer->m_hasStarted || playLayer->m_player1->m_isDead) {
+        m_accumulatedTime = 0.0f;
+        m_playbackTick = 0;
+        m_playbackIndex = 0;
+        m_lastButtonState = false;
+        return;
+    }
+
     m_accumulatedTime += dt;
     m_playbackTick = static_cast<uint32_t>(std::round(m_accumulatedTime * 240.0f));
 
@@ -177,6 +186,10 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
             m_lastButtonState = false;
         }
         m_playbackIndex++;
+    }
+
+    if (m_lastButtonState && playLayer->m_player1) {
+        playLayer->m_player1->pushButton(PlayerButton::Jump);
     }
 
     if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {

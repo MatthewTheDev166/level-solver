@@ -1,5 +1,6 @@
 #include "TelemetryPopup.hpp"
 #include "../replay/MacroManager.hpp"
+#include "../replay/GDRExporter.hpp"
 #include "../engine/HeadlessEngine.hpp"
 #include "../engine/ActiveLayerScope.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
@@ -11,9 +12,18 @@ using namespace geode::prelude;
 
 namespace solver {
 
+static void fitLabel(CCLabelBMFont* label, float maxWidth, float defaultScale) {
+    if (!label) return;
+    label->setScale(defaultScale);
+    float width = label->getContentWidth() * defaultScale;
+    if (width > maxWidth && width > 0.001f) {
+        label->setScale(defaultScale * (maxWidth / width));
+    }
+}
+
 TelemetryPopup* TelemetryPopup::create(GJGameLevel* level) {
     auto ret = new TelemetryPopup();
-    if (ret && ret->init(420.0f, 290.0f, level)) {
+    if (ret && ret->init(485.0f, 290.0f, level)) {
         ret->autorelease();
         return ret;
     }
@@ -107,13 +117,13 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
     // Control buttons menu
     auto buttonMenu = CCMenu::create();
-    buttonMenu->setPosition({ 210.0f, 35.0f });
+    buttonMenu->setPosition({ 242.5f, 35.0f });
     m_mainLayer->addChild(buttonMenu);
 
     // Start button
     auto startSpr = ButtonSprite::create("Start Solve", "goldFont.fnt", "GJ_button_01.png", 0.75f);
     m_startButton = CCMenuItemSpriteExtra::create(startSpr, this, menu_selector(TelemetryPopup::onStartSolver));
-    m_startButton->setPosition({ -110.0f, 0.0f });
+    m_startButton->setPosition({ -135.0f, 0.0f });
     buttonMenu->addChild(m_startButton);
 
     // Stop button
@@ -122,10 +132,10 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     m_stopButton->setPosition({ 0.0f, 0.0f });
     buttonMenu->addChild(m_stopButton);
 
-    // Replay button
+    // Replay / Export button
     auto replaySpr = ButtonSprite::create("Replay", "goldFont.fnt", "GJ_button_02.png", 0.75f);
     m_replayButton = CCMenuItemSpriteExtra::create(replaySpr, this, menu_selector(TelemetryPopup::onReplayMacro));
-    m_replayButton->setPosition({ 110.0f, 0.0f });
+    m_replayButton->setPosition({ 135.0f, 0.0f });
     m_replayButton->setEnabled(hasSavedMacro);
     buttonMenu->addChild(m_replayButton);
 
@@ -209,6 +219,17 @@ void TelemetryPopup::update(float dt) {
         m_macroStatusLabel->setString(hasSavedMacro ? "Saved Macro: Available on Disk (Ready to Replay)" : "Saved Macro: None Found");
         m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
     }
+
+    // Ensure all labels fit cleanly inside the popup box without overflowing
+    const float maxLabelW = 425.0f;
+    fitLabel(m_statusLabel, maxLabelW, 0.38f);
+    fitLabel(m_horizonLabel, maxLabelW, 0.42f);
+    fitLabel(m_waveLabel, maxLabelW, 0.80f);
+    fitLabel(m_populationLabel, maxLabelW, 0.80f);
+    fitLabel(m_backtrackLabel, maxLabelW, 0.80f);
+    fitLabel(m_memoryLabel, maxLabelW, 0.75f);
+    fitLabel(m_throughputLabel, maxLabelW, 0.75f);
+    fitLabel(m_macroStatusLabel, maxLabelW, 0.70f);
 
     // Button states
     bool isSearching = SwarmSolver::get().isRunning();
@@ -358,6 +379,21 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     }
 
     MacroManager::get().loadMacro(levelID, levelName);
+
+    // Export latest macro to Mega Hack replays directory (.gdr2 and .json)
+    auto exportRes = GDRExporter::exportReplays(levelName, levelID, MacroManager::get().getActions());
+    std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
+
+    std::string alertMsg = fmt::format(
+        "Macro exported to Mega Hack!\n\n"
+        "File: replays/{}-macro.gdr2\n"
+        "(also replays/{}-macro.json)\n\n"
+        "To play via Mega Hack:\n"
+        "Press Tab -> Replay -> select macro -> Load\n\n"
+        "In-game playback is also armed!",
+        safeName, safeName
+    );
+    FLAlertLayer::create("Macro Exported", alertMsg.c_str(), "OK")->show();
 
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
