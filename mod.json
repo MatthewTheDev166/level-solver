@@ -1,0 +1,29 @@
+{
+	"geode": "5.10.1",
+	"gd": {
+		"win": "2.2081",
+		"android": "2.2081",
+		"mac": "2.2081",
+		"ios": "2.2081"
+	},
+	"id": "matthew.level-solver",
+	"name": "Level Solver",
+	"version": "v1.0.0",
+	"developer": "Matthew",
+	"description": "Autonomous in-engine level solver using A* forward state search and 240 TPS headless simulation stepping.",
+	"dependencies": {
+		"geode.node-ids": ">=v1.23.3",
+		"legowiifun.cheat_api": {
+			"version": ">=v1.2.3",
+			"required": false
+		},
+		"alphalaneous.alphas_geode_utils": {
+			"version": ">=v1.0.0",
+			"required": true
+		},
+		"alphalaneous.alphas-ui-pack": {
+			"version": ">=v1.0.0",
+			"required": true
+		}
+	}
+}
