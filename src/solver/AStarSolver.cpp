@@ -43,6 +43,12 @@ void AStarSolver::start(PlayLayer* playLayer) {
     CheatAPIIntegrator::notifyCheatStarted();
     HeadlessEngine::get().enableHeadless();
 
+    playLayer->m_started = true;
+    playLayer->m_inResetDelay = false;
+    playLayer->m_playerDied = false;
+    playLayer->m_resumeTimer = 0;
+    playLayer->m_extraDelta = 0.0;
+
     PlayerSnapshot initialSnap;
     initialSnap.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
 
@@ -79,6 +85,12 @@ void AStarSolver::resume(PlayLayer* playLayer) {
     DeterministicPRNG::clampSeed();
     CheatAPIIntegrator::notifyCheatStarted();
     HeadlessEngine::get().enableHeadless();
+
+    playLayer->m_started = true;
+    playLayer->m_inResetDelay = false;
+    playLayer->m_playerDied = false;
+    playLayer->m_resumeTimer = 0;
+    playLayer->m_extraDelta = 0.0;
 
     m_telemetry.status = SolverStatus::Searching;
     m_telemetry.detailMessage = "A* Search in progress...";
@@ -177,7 +189,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     const auto timeBudget = std::chrono::milliseconds(12);
 
     while (!m_openQueue.empty() && stepsDone < maxSteps && m_isRunning) {
-        if ((stepsDone & 63) == 0 && stepsDone > 0) {
+        if ((stepsDone & 15) == 0 && stepsDone > 0) {
             auto now = std::chrono::high_resolution_clock::now();
             if (now - startBatch >= timeBudget) {
                 break;
@@ -232,6 +244,12 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             // Restore parent state prior to each branch step
             current.snapshot.restore(playLayer->m_player1);
 
+            playLayer->m_started = true;
+            playLayer->m_inResetDelay = false;
+            playLayer->m_playerDied = false;
+            playLayer->m_resumeTimer = 0;
+            playLayer->m_extraDelta = 0.0;
+
             // Apply candidate action
             if (act == ActionType::Jump) {
                 playLayer->m_player1->pushButton(PlayerButton::Jump);
@@ -244,8 +262,9 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             stepsDone++;
 
             // If player died, backtrack
-            if (playLayer->m_player1->m_isDead) {
+            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
                 playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                playLayer->m_playerDied = false;
                 continue;
             }
 
@@ -293,6 +312,12 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     m_telemetry.prunedStates = m_spatialGrid.getPrunedCount();
     m_telemetry.ticksPerSecond = HeadlessEngine::get().getTicksPerSecond();
     m_telemetry.memoryFootprintBytes = (m_openQueue.size() + m_nodePool.size()) * sizeof(SearchNode) + m_spatialGrid.size() * 32;
+
+    static uint32_t s_logThrottle = 0;
+    if (++s_logThrottle % 60 == 0) {
+        geode::log::info("[LevelSolver] Progress: horizon={:.1f}%, tick={}, open={}, pruned={}, rate={:.0f} tps, maxReachedX={:.0f}/{}",
+            m_telemetry.explorationHorizon, m_currentTick, m_openQueue.size(), m_spatialGrid.getPrunedCount(), m_telemetry.ticksPerSecond, m_maxReachedX, m_levelLength);
+    }
 
     if (m_openQueue.empty() && m_isRunning && !m_isCompleted) {
         m_isRunning = false;

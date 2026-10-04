@@ -7,7 +7,7 @@ namespace solver {
 
 class HeadlessEngine {
 public:
-    static constexpr float FIXED_DT = 1.0f / 240.0f;
+    static constexpr float FIXED_DT = 0.00416667f; // Aligned with GD 2.2 240Hz physics substep threshold
     static constexpr uint32_t DEFAULT_BATCH_TICKS = 600;
 
     static HeadlessEngine& get();

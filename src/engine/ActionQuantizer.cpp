@@ -26,12 +26,12 @@ std::vector<ActionType> ActionQuantizer::getCandidateActions(
 
     if (isContinuousMode(mode)) {
         // Continuous modes: Ship, Wave, Swing
-        // Only allow decisions at block boundary multiples to prevent 2^240 branching
+        // Decision points at CONTINUOUS_BLOCK_SIZE intervals (4 ticks = 1/60s at 240Hz)
         if ((currentTick % CONTINUOUS_BLOCK_SIZE) != 0) {
             return { currentAction };
         }
 
-        // At block boundaries, branch into releasing or holding
+        // At decision boundaries, branch into holding or releasing
         return { ActionType::None, ActionType::Jump };
     }
 
@@ -41,17 +41,31 @@ std::vector<ActionType> ActionQuantizer::getCandidateActions(
                           player->m_touchedRing || player->m_touchedPad;
 
     if (mode == VehicleMode::UFO) {
-        // UFO can flap in mid-air, but limit branching to periodic intervals or near orbs
-        if (isNearOrbOrPad || (currentTick % 8 == 0)) {
+        // UFO flaps upward periodically (every 6 ticks) or near orbs
+        if (isNearOrbOrPad || (currentTick % 6 == 0)) {
+            return { ActionType::None, ActionType::Jump };
+        }
+        return { ActionType::None };
+    }
+
+    if (mode == VehicleMode::Ball || mode == VehicleMode::Spider) {
+        // Ball and Spider switch gravity/teleport on single click when grounded or near orbs
+        if (isGrounded || isNearOrbOrPad) {
             return { ActionType::None, ActionType::Jump };
         }
         return { ActionType::None };
     }
 
     if (mode == VehicleMode::Robot) {
-        // Robot can hold jump while grounded or within 60 ticks (~0.25s at 240 TPS) of takeoff
-        if (isGrounded || (currentAction == ActionType::Jump && currentHoldTicks < 60)) {
+        // Robot can hold jump while grounded or within takeoff window
+        if (isGrounded) {
             return { ActionType::None, ActionType::Jump };
+        }
+        if (currentAction == ActionType::Jump && currentHoldTicks < 40) {
+            if (currentHoldTicks % 6 == 0) {
+                return { ActionType::None, ActionType::Jump };
+            }
+            return { ActionType::Jump };
         }
         if (isNearOrbOrPad) {
             return { ActionType::None, ActionType::Jump };
@@ -59,8 +73,32 @@ std::vector<ActionType> ActionQuantizer::getCandidateActions(
         return { ActionType::None };
     }
 
-    // Cube, Ball, Spider: branching ONLY permitted when grounded or touching/near interactables
-    if (isGrounded || isNearOrbOrPad) {
+    // Cube mode:
+    if (isGrounded) {
+        return { ActionType::None, ActionType::Jump };
+    }
+
+    // While airborne in Cube mode:
+    if (currentAction == ActionType::Jump) {
+        // Full standard jump in Geometry Dash at 240Hz requires holding for ~20-22 ticks.
+        // Maintain hold for at least 8 ticks to gain sufficient height over basic obstacles.
+        if (currentHoldTicks < 8) {
+            return { ActionType::Jump };
+        }
+        // At tick 8: short hop (release) vs full jump (hold) branching point
+        if (currentHoldTicks == 8) {
+            return { ActionType::None, ActionType::Jump };
+        }
+        // If continuing full jump, hold up to 22 ticks
+        if (currentHoldTicks < 22) {
+            return { ActionType::Jump };
+        }
+        // Maximum jump hold duration reached, must release
+        return { ActionType::None };
+    }
+
+    // Near an interactable orb or pad in mid-air
+    if (isNearOrbOrPad) {
         return { ActionType::None, ActionType::Jump };
     }
 

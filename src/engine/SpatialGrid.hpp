@@ -12,10 +12,12 @@ struct SpatialKey {
     int32_t vy = 0;
     uint8_t mode = 0;
     uint8_t gravity = 0;
+    uint8_t isHolding = 0;
 
     bool operator==(const SpatialKey& other) const {
         return x == other.x && y == other.y && vy == other.vy &&
-               mode == other.mode && gravity == other.gravity;
+               mode == other.mode && gravity == other.gravity &&
+               isHolding == other.isHolding;
     }
 };
 
@@ -27,14 +29,15 @@ struct SpatialKeyHash {
         h = (h ^ static_cast<size_t>(k.vy)) * 16777619u;
         h = (h ^ static_cast<size_t>(k.mode)) * 16777619u;
         h = (h ^ static_cast<size_t>(k.gravity)) * 16777619u;
+        h = (h ^ static_cast<size_t>(k.isHolding)) * 16777619u;
         return h;
     }
 };
 
 class SpatialGrid {
 public:
-    static constexpr float CELL_SIZE_X = 1.5f;
-    static constexpr float CELL_SIZE_Y = 1.5f;
+    static constexpr float CELL_SIZE_X = 1.0f;
+    static constexpr float CELL_SIZE_Y = 1.0f;
     static constexpr float CELL_SIZE_VY = 0.5f;
 
     static SpatialKey computeKey(const PlayerSnapshot& snapshot) {
@@ -44,6 +47,7 @@ public:
         key.vy = static_cast<int32_t>(std::floor(snapshot.yVelocity / CELL_SIZE_VY));
         key.mode = static_cast<uint8_t>(snapshot.mode);
         key.gravity = snapshot.isUpsideDown ? 1 : 0;
+        key.isHolding = snapshot.isHolding ? 1 : 0;
         return key;
     }
 
