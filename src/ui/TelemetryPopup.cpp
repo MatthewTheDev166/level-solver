@@ -93,7 +93,8 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
     // Macro status label
     int levelID = level ? level->m_levelID.value() : 0;
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID);
+    std::string levelName = level ? level->m_levelName : "";
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName);
     m_macroStatusLabel = CCLabelBMFont::create(
         hasSavedMacro ? "Saved Macro: Available on Disk (Ready to Replay)" : "Saved Macro: None Found",
         "chatFont.fnt"
@@ -134,6 +135,11 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
 
 void TelemetryPopup::update(float dt) {
+    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
+        eglView->showCursor(true);
+    }
+
+    // Ensure mouse cursor remains visible while popup is open
     if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
         eglView->showCursor(true);
     }
@@ -197,7 +203,8 @@ void TelemetryPopup::update(float dt) {
 
     // Macro status
     int levelID = m_level ? m_level->m_levelID.value() : 0;
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID) || SwarmSolver::get().isCompleted();
+    std::string levelName = m_level ? m_level->m_levelName : "";
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
     if (m_macroStatusLabel) {
         m_macroStatusLabel->setString(hasSavedMacro ? "Saved Macro: Available on Disk (Ready to Replay)" : "Saved Macro: None Found");
         m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
@@ -343,13 +350,14 @@ void TelemetryPopup::onStopSolver(cocos2d::CCObject* sender) {
 void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     if (!m_level) return;
     int levelID = m_level->m_levelID.value();
+    std::string levelName = m_level->m_levelName;
 
-    if (!MacroManager::get().hasMacro(levelID) && !SwarmSolver::get().isCompleted()) {
+    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
         FLAlertLayer::create("No Macro", "No solved macro found for this level.", "OK")->show();
         return;
     }
 
-    MacroManager::get().loadMacro(levelID);
+    MacroManager::get().loadMacro(levelID, levelName);
 
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {

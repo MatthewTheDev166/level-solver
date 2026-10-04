@@ -102,7 +102,7 @@ struct PlayerSnapshot {
 
     void capture(PlayerObject* player, uint32_t currentTick, uint32_t currentSeed = 1337) {
         if (!player) return;
-        position = (player->m_position.x != 0.0f || player->m_position.y != 0.0f) ? player->m_position : player->getPosition();
+        position = player->getPosition();
         yVelocity = player->m_yVelocity;
         fallSpeed = player->m_fallSpeed;
         rotation = player->getRotation();

@@ -39,8 +39,9 @@ class $modify(SolverPlayLayer, PlayLayer) {
         // Check for existing solved macro for this level
         if (level) {
             int levelID = level->m_levelID.value();
-            if (solver::MacroManager::get().hasMacro(levelID)) {
-                solver::MacroManager::get().loadMacro(levelID);
+            std::string levelName = level->m_levelName;
+            if (solver::MacroManager::get().hasMacro(levelID, levelName)) {
+                solver::MacroManager::get().loadMacro(levelID, levelName);
             }
         }
 

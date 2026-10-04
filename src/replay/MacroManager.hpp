@@ -16,10 +16,10 @@ public:
     void setActions(const std::vector<TickAction>& actions);
     const std::vector<TickAction>& getActions() const;
 
-    std::filesystem::path getMacroPath(int levelID) const;
-    bool saveMacro(int levelID);
-    bool loadMacro(int levelID);
-    bool hasMacro(int levelID) const;
+    std::filesystem::path getMacroPath(int levelID, const std::string& levelName = "") const;
+    bool saveMacro(int levelID, const std::string& levelName = "");
+    bool loadMacro(int levelID, const std::string& levelName = "");
+    bool hasMacro(int levelID, const std::string& levelName = "") const;
 
     void startReplay(PlayLayer* playLayer);
     void stopReplay(PlayLayer* playLayer);

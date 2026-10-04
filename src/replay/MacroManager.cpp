@@ -27,15 +27,31 @@ const std::vector<TickAction>& MacroManager::getActions() const {
     return m_actions;
 }
 
-std::filesystem::path MacroManager::getMacroPath(int levelID) const {
-    auto dir = geode::Mod::get()->getSaveDir() / "macros";
-    std::filesystem::create_directories(dir);
-    return dir / fmt::format("{}.json", levelID);
+static std::string sanitizeFilename(const std::string& input) {
+    std::string out;
+    for (char c : input) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') {
+            out += c;
+        } else if (c == ' ') {
+            out += '_';
+        }
+    }
+    return out.empty() ? "unnamed" : out;
 }
 
-bool MacroManager::saveMacro(int levelID) {
+std::filesystem::path MacroManager::getMacroPath(int levelID, const std::string& levelName) const {
+    auto dir = geode::Mod::get()->getSaveDir() / "macros";
+    std::filesystem::create_directories(dir);
+    if (levelID > 0) {
+        return dir / fmt::format("{}.json", levelID);
+    }
+    std::string safeName = sanitizeFilename(levelName);
+    return dir / fmt::format("local_{}.json", safeName);
+}
+
+bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
     try {
-        auto filePath = getMacroPath(levelID);
+        auto filePath = getMacroPath(levelID, levelName);
         std::vector<matjson::Value> rootArray;
 
         for (const auto& action : m_actions) {
@@ -63,9 +79,9 @@ bool MacroManager::saveMacro(int levelID) {
     }
 }
 
-bool MacroManager::loadMacro(int levelID) {
+bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
     try {
-        auto filePath = getMacroPath(levelID);
+        auto filePath = getMacroPath(levelID, levelName);
         if (!std::filesystem::exists(filePath)) {
             return false;
         }
@@ -102,8 +118,8 @@ bool MacroManager::loadMacro(int levelID) {
     }
 }
 
-bool MacroManager::hasMacro(int levelID) const {
-    return std::filesystem::exists(getMacroPath(levelID));
+bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
+    return std::filesystem::exists(getMacroPath(levelID, levelName));
 }
 
 void MacroManager::startReplay(PlayLayer* playLayer) {

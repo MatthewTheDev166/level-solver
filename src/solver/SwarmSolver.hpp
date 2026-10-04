@@ -56,6 +56,7 @@ private:
     bool m_isRunning = false;
     bool m_isCompleted = false;
     int m_levelID = 0;
+    std::string m_levelName;
     float m_startX = 0.0f;
     float m_levelLength = 0.0f;
     float m_maxReachedX = 0.0f;
