@@ -35,14 +35,16 @@ std::filesystem::path MacroManager::getMacroPath(int levelID) const {
 bool MacroManager::saveMacro(int levelID) {
     try {
         auto filePath = getMacroPath(levelID);
-        matjson::Value root = matjson::Value::array();
+        std::vector<matjson::Value> rootArray;
 
         for (const auto& action : m_actions) {
             matjson::Value obj;
             obj["tick"] = static_cast<double>(action.tick);
             obj["pressed"] = action.pressed;
-            root.push_back(obj);
+            rootArray.push_back(std::move(obj));
         }
+
+        matjson::Value root = rootArray;
 
         std::ofstream file(filePath);
         if (!file.is_open()) {
@@ -83,10 +85,10 @@ bool MacroManager::loadMacro(int levelID) {
         for (const auto& item : parsed.unwrap().asArray().unwrap()) {
             TickAction act;
             if (item.contains("tick")) {
-                act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOrDefault(0.0));
+                act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
             }
             if (item.contains("pressed")) {
-                act.pressed = item["pressed"].asBool().unwrapOrDefault(false);
+                act.pressed = item["pressed"].asBool().unwrapOr(false);
             }
             m_actions.push_back(act);
         }

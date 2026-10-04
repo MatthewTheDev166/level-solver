@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Geode/Geode.hpp>
+#include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <alphalaneous.alphas-ui-pack/include/API.hpp>
 #include "../solver/AStarSolver.hpp"
