@@ -1,7 +1,9 @@
 #include "MacroManager.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
+#include <Geode/binding/PlayerObject.hpp>
 #include <matjson.hpp>
 #include <fstream>
+#include <algorithm>
 
 namespace solver {
 
@@ -12,15 +14,41 @@ MacroManager& MacroManager::get() {
 
 void MacroManager::clear() {
     m_actions.clear();
-    m_accumulatedTime = 0.0f;
     m_playbackTick = 0;
     m_playbackIndex = 0;
-    m_isReplaying = false;
+    m_totalTicks = 0;
+    m_state = ReplayState::Idle;
     m_lastButtonState = false;
+    m_isDispatchingInput = false;
+    m_armedLevelID = 0;
+    m_armedLevelName.clear();
 }
 
 void MacroManager::setActions(const std::vector<TickAction>& actions) {
     m_actions = actions;
+
+    // 1. Sort strictly by tick in ascending order
+    std::sort(m_actions.begin(), m_actions.end(), [](const TickAction& a, const TickAction& b) {
+        if (a.tick == b.tick) {
+            return !a.pressed && b.pressed;
+        }
+        return a.tick < b.tick;
+    });
+
+    // 2. Deduplicate consecutive identical states
+    std::vector<TickAction> clean;
+    bool lastState = false;
+    for (const auto& act : m_actions) {
+        if (clean.empty()) {
+            clean.push_back(act);
+            lastState = act.pressed;
+        } else if (act.pressed != lastState) {
+            clean.push_back(act);
+            lastState = act.pressed;
+        }
+    }
+    m_actions = clean;
+    m_totalTicks = m_actions.empty() ? 0 : m_actions.back().tick;
 }
 
 const std::vector<TickAction>& MacroManager::getActions() const {
@@ -41,7 +69,8 @@ static std::string sanitizeFilename(const std::string& input) {
 
 std::filesystem::path MacroManager::getMacroPath(int levelID, const std::string& levelName) const {
     auto dir = geode::Mod::get()->getSaveDir() / "macros";
-    std::filesystem::create_directories(dir);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
     if (levelID > 0) {
         return dir / fmt::format("{}.json", levelID);
     }
@@ -98,7 +127,7 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
             return false;
         }
 
-        m_actions.clear();
+        std::vector<TickAction> loaded;
         for (const auto& item : parsed.unwrap().asArray().unwrap()) {
             TickAction act;
             if (item.contains("tick")) {
@@ -107,11 +136,12 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
             if (item.contains("pressed")) {
                 act.pressed = item["pressed"].asBool().unwrapOr(false);
             }
-            m_actions.push_back(act);
+            loaded.push_back(act);
         }
 
+        setActions(loaded);
         geode::log::info("[LevelSolver] Loaded {} inputs from {}", m_actions.size(), filePath.string());
-        return true;
+        return !m_actions.empty();
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception loading macro: {}", e.what());
         return false;
@@ -125,115 +155,145 @@ bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
     return !ec && size > 64;
 }
 
-void MacroManager::queueReplay(int levelID, const std::string& levelName) {
-    loadMacro(levelID, levelName);
-    m_pendingReplay = true;
-    geode::log::info("[LevelSolver] Queued macro replay for level ID {}, name '{}' ({} actions)", levelID, levelName, m_actions.size());
-}
-
-bool MacroManager::hasPendingReplay() const {
-    return m_pendingReplay;
-}
-
-void MacroManager::startReplay(PlayLayer* playLayer) {
-    if (!playLayer || m_actions.empty()) return;
-
-    m_isReplaying = true;
-    m_pendingReplay = false;
-    m_accumulatedTime = 0.0f;
-    m_playbackTick = 0;
-    m_playbackIndex = 0;
-    m_lastButtonState = false;
-
-    CheatAPIIntegrator::notifyCheatStarted();
-    geode::log::info("[LevelSolver] Starting replay with {} recorded actions", m_actions.size());
-}
-
-void MacroManager::stopReplay(PlayLayer* playLayer) {
-    m_pendingReplay = false;
-    if (m_isReplaying) {
-        m_isReplaying = false;
-        if (playLayer && m_lastButtonState) {
-            playLayer->handleButton(false, 1, true);
-            m_lastButtonState = false;
-        }
-        CheatAPIIntegrator::notifyCheatEnded();
-        geode::log::info("[LevelSolver] Replay stopped");
-    }
-}
-
-void MacroManager::stepReplaySubstep(PlayLayer* playLayer) {
-    if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
-
-    if (!playLayer->m_started || playLayer->m_player1->m_isDead) {
-        m_playbackTick = 0;
-        m_playbackIndex = 0;
-        if (m_lastButtonState) {
-            playLayer->handleButton(false, 1, true);
-            m_lastButtonState = false;
-        }
+void MacroManager::armReplay(int levelID, const std::string& levelName) {
+    if (!loadMacro(levelID, levelName) || m_actions.empty()) {
+        geode::log::warn("[LevelSolver] Cannot arm replay: macro empty or failed to load");
         return;
     }
 
+    m_armedLevelID = levelID;
+    m_armedLevelName = levelName;
+    m_playbackTick = 0;
+    m_playbackIndex = 0;
+    m_lastButtonState = false;
+    m_state = ReplayState::Armed;
+
+    CheatAPIIntegrator::notifyCheatStarted();
+    geode::log::info("[LevelSolver] Replay armed for level {} ('{}') with {} actions (total ticks: {})",
+        levelID, levelName, m_actions.size(), m_totalTicks);
+}
+
+void MacroManager::onLevelReset(PlayLayer* playLayer) {
+    if (m_state == ReplayState::Idle) return;
+
+    // Safety release: ensure no lingering jump state across attempts
+    if (playLayer) {
+        m_isDispatchingInput = true;
+        playLayer->handleButton(false, 1, true);
+        if (playLayer->m_player1) {
+            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        }
+        m_isDispatchingInput = false;
+    }
+
+    m_playbackTick = 0;
+    m_playbackIndex = 0;
+    m_lastButtonState = false;
+    m_state = ReplayState::Armed;
+
+    geode::log::info("[LevelSolver] Replay armed on level reset (ready for new attempt, actions: {})", m_actions.size());
+}
+
+void MacroManager::onGameStart(PlayLayer* playLayer) {
+    if (m_state != ReplayState::Armed && m_state != ReplayState::Playing) return;
+    if (m_actions.empty()) {
+        m_state = ReplayState::Idle;
+        return;
+    }
+
+    m_playbackTick = 0;
+    m_playbackIndex = 0;
+    m_lastButtonState = false;
+    m_state = ReplayState::Playing;
+
+    CheatAPIIntegrator::notifyCheatStarted();
+    geode::log::info("[LevelSolver] Replay playback started at tick 0 with {} recorded actions", m_actions.size());
+}
+
+void MacroManager::stepReplay(PlayLayer* playLayer) {
+    if (m_state != ReplayState::Playing || !playLayer || !playLayer->m_player1) return;
+
+    // Safety: freeze playback during respawn transitions or death
+    if (playLayer->m_playerDied || playLayer->m_player1->m_isDead || playLayer->m_inResetDelay) {
+        return;
+    }
+
+    // Dispatch all scheduled actions up to and including the current physics tick
     while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
-        const auto& act = m_actions[m_playbackIndex];
+        const auto& act = m_actions[m_playbackIndex++];
         if (act.pressed != m_lastButtonState) {
+            m_isDispatchingInput = true;
             playLayer->handleButton(act.pressed, 1, true);
+            if (playLayer->m_player1) {
+                if (act.pressed) {
+                    playLayer->m_player1->pushButton(PlayerButton::Jump);
+                } else {
+                    playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                }
+            }
+            m_isDispatchingInput = false;
             m_lastButtonState = act.pressed;
         }
-        m_playbackIndex++;
     }
 
     m_playbackTick++;
 
     if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
-        static bool s_loggedEnd = false;
-        if (!s_loggedEnd) {
-            s_loggedEnd = true;
-            geode::log::info("[LevelSolver] Macro replay completed all inputs");
-        }
+        m_state = ReplayState::Finished;
+        geode::log::info("[LevelSolver] Macro replay completed all inputs at tick {}", m_playbackTick);
     }
 }
 
-void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
-    if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
+void MacroManager::stopReplay(PlayLayer* playLayer) {
+    if (m_state == ReplayState::Idle) return;
 
-    // Do NOT tick or burn macro actions while the level is still fading in / loading!
-    if (!playLayer->m_started || playLayer->m_player1->m_isDead) {
-        m_accumulatedTime = 0.0f;
-        m_playbackTick = 0;
-        m_playbackIndex = 0;
-        if (m_lastButtonState) {
-            playLayer->handleButton(false, 1, true);
-            m_lastButtonState = false;
+    if (playLayer && m_lastButtonState) {
+        m_isDispatchingInput = true;
+        playLayer->handleButton(false, 1, true);
+        if (playLayer->m_player1) {
+            playLayer->m_player1->releaseButton(PlayerButton::Jump);
         }
-        return;
+        m_isDispatchingInput = false;
     }
 
-    m_accumulatedTime += dt;
-    m_playbackTick = static_cast<uint32_t>(std::round(m_accumulatedTime * 240.0f));
+    m_state = ReplayState::Idle;
+    m_lastButtonState = false;
+    m_playbackTick = 0;
+    m_playbackIndex = 0;
+    CheatAPIIntegrator::notifyCheatEnded();
+    geode::log::info("[LevelSolver] Replay stopped and disarmed");
+}
 
-    while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
-        const auto& act = m_actions[m_playbackIndex];
-        if (act.pressed != m_lastButtonState) {
-            playLayer->handleButton(act.pressed, 1, true);
-            m_lastButtonState = act.pressed;
-        }
-        m_playbackIndex++;
-    }
+bool MacroManager::isArmed() const {
+    return m_state == ReplayState::Armed;
+}
 
-    if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
-        // Replay finished
-        geode::log::info("[LevelSolver] Macro replay completed all inputs");
-    }
+bool MacroManager::isPlaying() const {
+    return m_state == ReplayState::Playing;
 }
 
 bool MacroManager::isReplaying() const {
-    return m_isReplaying;
+    return m_state == ReplayState::Armed || m_state == ReplayState::Playing || m_state == ReplayState::Finished;
+}
+
+bool MacroManager::isDispatchingInput() const {
+    return m_isDispatchingInput;
 }
 
 uint32_t MacroManager::getCurrentPlaybackTick() const {
     return m_playbackTick;
+}
+
+size_t MacroManager::getCurrentActionIndex() const {
+    return m_playbackIndex;
+}
+
+size_t MacroManager::getTotalActions() const {
+    return m_actions.size();
+}
+
+uint32_t MacroManager::getTotalTicks() const {
+    return m_totalTicks;
 }
 
 } // namespace solver

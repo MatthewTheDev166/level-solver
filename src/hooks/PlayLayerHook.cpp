@@ -14,12 +14,21 @@ using namespace geode::prelude;
 
 class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
-        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
-        if (!isHalfTick && solver::MacroManager::get().isReplaying()) {
-            if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
-                solver::MacroManager::get().stepReplaySubstep(pl);
+        if (!isHalfTick && solver::MacroManager::get().isPlaying()) {
+            if (!this->m_inResetDelay && this->m_started && !this->m_playerDied && this->m_player1 && !this->m_player1->m_isDead) {
+                if (auto pl = static_cast<PlayLayer*>(this)) {
+                    solver::MacroManager::get().stepReplay(pl);
+                }
             }
         }
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+    }
+
+    void handleButton(bool down, int button, bool isPlayer1) {
+        if (solver::MacroManager::get().isPlaying() && !solver::MacroManager::get().isDispatchingInput()) {
+            return;
+        }
+        GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 };
 
@@ -48,13 +57,28 @@ class $modify(SolverPlayLayer, PlayLayer) {
         // Clamp engine pseudo-random number generator for determinism
         solver::DeterministicPRNG::clampSeed();
 
+        // Create on-screen replay status badge
+        auto badge = cocos2d::CCLabelBMFont::create("", "chatFont.fnt");
+        badge->setTag(108492);
+        badge->setScale(0.55f);
+        badge->setAnchorPoint({ 0.0f, 1.0f });
+        auto winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
+        badge->setPosition({ 10.0f, winSize.height - 10.0f });
+        badge->setZOrder(999);
+        badge->setVisible(false);
+        this->addChild(badge);
+
         // Check for existing solved macro for this level
-        if (level) {
+        if (level && !solver::MacroManager::get().isArmed()) {
             int levelID = level->m_levelID.value();
             std::string levelName = level->m_levelName;
             if (solver::MacroManager::get().hasMacro(levelID, levelName)) {
-                solver::MacroManager::get().loadMacro(levelID, levelName);
+                solver::MacroManager::get().armReplay(levelID, levelName);
             }
+        }
+
+        if (solver::MacroManager::get().isArmed()) {
+            solver::MacroManager::get().onLevelReset(this);
         }
 
         return true;
@@ -63,14 +87,34 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void startGame() {
         PlayLayer::startGame();
         if (!solver::HeadlessEngine::get().isHeadless()) {
-            if (solver::MacroManager::get().hasPendingReplay()) {
-                solver::MacroManager::get().startReplay(this);
-            }
+            solver::MacroManager::get().onGameStart(this);
         }
     }
 
     void update(float dt) {
         PlayLayer::update(dt);
+
+        if (!solver::HeadlessEngine::get().isHeadless()) {
+            if (auto badge = static_cast<cocos2d::CCLabelBMFont*>(this->getChildByTag(108492))) {
+                if (solver::MacroManager::get().isPlaying()) {
+                    badge->setVisible(true);
+                    uint32_t curTick = solver::MacroManager::get().getCurrentPlaybackTick();
+                    uint32_t totTick = solver::MacroManager::get().getTotalTicks();
+                    size_t curAct = solver::MacroManager::get().getCurrentActionIndex();
+                    size_t totAct = solver::MacroManager::get().getTotalActions();
+                    badge->setString(fmt::format("[REPLAY BOT] 240 TPS | Tick: {}/{} | Inputs: {}/{}",
+                        curTick, totTick, curAct, totAct).c_str());
+                    badge->setColor({ 0, 255, 128 });
+                } else if (solver::MacroManager::get().isArmed()) {
+                    badge->setVisible(true);
+                    badge->setString(fmt::format("[REPLAY BOT] Armed ({} inputs ready on start)",
+                        solver::MacroManager::get().getTotalActions()).c_str());
+                    badge->setColor({ 255, 200, 0 });
+                } else {
+                    badge->setVisible(false);
+                }
+            }
+        }
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
@@ -149,9 +193,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();
         }
-        if (solver::MacroManager::get().isReplaying()) {
-            solver::MacroManager::get().stopReplay(this);
-        }
+        solver::MacroManager::get().stopReplay(this);
         solver::CheatAPIIntegrator::notifyCheatEnded();
 
         PlayLayer::onQuit();
@@ -159,11 +201,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void resetLevel() {
         PlayLayer::resetLevel();
-        // If replaying macro, restart playback
         if (!solver::HeadlessEngine::get().isHeadless()) {
-            if (solver::MacroManager::get().isReplaying() || solver::MacroManager::get().hasPendingReplay()) {
-                solver::MacroManager::get().startReplay(this);
-            }
+            solver::MacroManager::get().onLevelReset(this);
         }
     }
 };

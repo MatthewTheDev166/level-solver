@@ -479,18 +479,16 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         MacroManager::get().loadMacro(levelID, levelName);
     }
 
+    MacroManager::get().armReplay(levelID, levelName);
+
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
         m_previousPlayLayer->resetLevel();
-        MacroManager::get().startReplay(m_previousPlayLayer);
         this->onClose(nullptr);
         return;
     }
 
     cleanupHeadless();
-
-    // Queue replay so when PlayLayer starts, it automatically begins replay!
-    MacroManager::get().queueReplay(levelID, levelName);
 
     // Transition to gameplay scene to watch playback
     auto scene = PlayLayer::scene(m_level, false, false);
