@@ -12,6 +12,51 @@
 
 using namespace geode::prelude;
 
+static void updateReplayBadge(PlayLayer* pl) {
+    if (!pl || solver::HeadlessEngine::get().isHeadless()) return;
+
+    // Use m_uiLayer so HUD badge is anchored in screen space and drawn above level graphics
+    cocos2d::CCNode* targetParent = pl->m_uiLayer ? static_cast<cocos2d::CCNode*>(pl->m_uiLayer) : static_cast<cocos2d::CCNode*>(pl);
+    auto badge = static_cast<cocos2d::CCLabelBMFont*>(targetParent->getChildByTag(108492));
+    if (!badge && pl->m_uiLayer) {
+        badge = static_cast<cocos2d::CCLabelBMFont*>(pl->getChildByTag(108492));
+    }
+
+    if (!badge) {
+        badge = cocos2d::CCLabelBMFont::create("", "bigFont.fnt");
+        if (!badge) return;
+        badge->setTag(108492);
+        badge->setScale(0.40f);
+        badge->setAnchorPoint({ 0.0f, 1.0f });
+        auto winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
+        badge->setPosition({ 10.0f, winSize.height - 10.0f });
+        badge->setZOrder(99999);
+        targetParent->addChild(badge, 99999);
+    }
+
+    if (solver::MacroManager::get().isPlaying()) {
+        badge->setVisible(true);
+        uint32_t curTick = solver::MacroManager::get().getCurrentPlaybackTick();
+        uint32_t totTick = solver::MacroManager::get().getTotalTicks();
+        size_t curAct = solver::MacroManager::get().getCurrentActionIndex();
+        size_t totAct = solver::MacroManager::get().getTotalActions();
+        badge->setString(fmt::format("[REPLAY BOT] 240 TPS | Tick: {}/{} | Inputs: {}/{}",
+            curTick, totTick, curAct, totAct).c_str());
+        badge->setColor({ 0, 255, 128 });
+    } else if (solver::MacroManager::get().isArmed()) {
+        badge->setVisible(true);
+        badge->setString(fmt::format("[REPLAY BOT] Armed ({} inputs ready on start)",
+            solver::MacroManager::get().getTotalActions()).c_str());
+        badge->setColor({ 255, 200, 0 });
+    } else if (solver::MacroManager::get().isReplaying()) {
+        badge->setVisible(true);
+        badge->setString("[REPLAY BOT] Inputs Complete (Rolling to end)");
+        badge->setColor({ 100, 220, 255 });
+    } else {
+        badge->setVisible(false);
+    }
+}
+
 class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isHalfTick && solver::MacroManager::get().isPlaying()) {
@@ -29,6 +74,13 @@ class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
             return;
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+
+    void update(float dt) {
+        GJBaseGameLayer::update(dt);
+        if (auto pl = PlayLayer::get()) {
+            updateReplayBadge(pl);
+        }
     }
 };
 
@@ -57,17 +109,6 @@ class $modify(SolverPlayLayer, PlayLayer) {
         // Clamp engine pseudo-random number generator for determinism
         solver::DeterministicPRNG::clampSeed();
 
-        // Create on-screen replay status badge
-        auto badge = cocos2d::CCLabelBMFont::create("", "chatFont.fnt");
-        badge->setTag(108492);
-        badge->setScale(0.55f);
-        badge->setAnchorPoint({ 0.0f, 1.0f });
-        auto winSize = cocos2d::CCDirector::sharedDirector()->getWinSize();
-        badge->setPosition({ 10.0f, winSize.height - 10.0f });
-        badge->setZOrder(999);
-        badge->setVisible(false);
-        this->addChild(badge);
-
         // Check for existing solved macro for this level
         if (level && !solver::MacroManager::get().isArmed()) {
             int levelID = level->m_levelID.value();
@@ -81,6 +122,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
             solver::MacroManager::get().onLevelReset(this);
         }
 
+        updateReplayBadge(this);
+
         return true;
     }
 
@@ -88,37 +131,13 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::startGame();
         if (!solver::HeadlessEngine::get().isHeadless()) {
             solver::MacroManager::get().onGameStart(this);
+            updateReplayBadge(this);
         }
     }
 
-    void update(float dt) {
-        PlayLayer::update(dt);
-
-        if (!solver::HeadlessEngine::get().isHeadless()) {
-            if (auto badge = static_cast<cocos2d::CCLabelBMFont*>(this->getChildByTag(108492))) {
-                if (solver::MacroManager::get().isPlaying()) {
-                    badge->setVisible(true);
-                    uint32_t curTick = solver::MacroManager::get().getCurrentPlaybackTick();
-                    uint32_t totTick = solver::MacroManager::get().getTotalTicks();
-                    size_t curAct = solver::MacroManager::get().getCurrentActionIndex();
-                    size_t totAct = solver::MacroManager::get().getTotalActions();
-                    badge->setString(fmt::format("[REPLAY BOT] 240 TPS | Tick: {}/{} | Inputs: {}/{}",
-                        curTick, totTick, curAct, totAct).c_str());
-                    badge->setColor({ 0, 255, 128 });
-                } else if (solver::MacroManager::get().isArmed()) {
-                    badge->setVisible(true);
-                    badge->setString(fmt::format("[REPLAY BOT] Armed ({} inputs ready on start)",
-                        solver::MacroManager::get().getTotalActions()).c_str());
-                    badge->setColor({ 255, 200, 0 });
-                } else if (solver::MacroManager::get().isReplaying()) {
-                    badge->setVisible(true);
-                    badge->setString("[REPLAY BOT] Inputs Complete (Rolling to end)");
-                    badge->setColor({ 100, 220, 255 });
-                } else {
-                    badge->setVisible(false);
-                }
-            }
-        }
+    void postUpdate(float dt) {
+        PlayLayer::postUpdate(dt);
+        updateReplayBadge(this);
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
@@ -207,6 +226,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
         if (!solver::HeadlessEngine::get().isHeadless()) {
             solver::MacroManager::get().onLevelReset(this);
+            updateReplayBadge(this);
         }
     }
 };

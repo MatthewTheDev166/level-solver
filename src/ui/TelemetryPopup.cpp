@@ -483,6 +483,12 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
 
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
+        cleanupHeadless();
+        if (auto scene = cocos2d::CCDirector::sharedDirector()->getRunningScene()) {
+            if (auto pauseLayer = scene->getChildByType<PauseLayer>(0)) {
+                pauseLayer->onResume(nullptr);
+            }
+        }
         m_previousPlayLayer->resetLevel();
         this->onClose(nullptr);
         return;
