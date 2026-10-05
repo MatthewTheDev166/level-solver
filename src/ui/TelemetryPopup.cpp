@@ -321,6 +321,9 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
             m_headlessPlayLayer->processCreateObjectsFromSetup();
         }
 
+        m_headlessPlayLayer->createObjectsFromSetupFinished();
+        m_headlessPlayLayer->setupHasCompleted();
+
         m_headlessPlayLayer->resetLevel();
         m_headlessPlayLayer->startGame();
         m_headlessPlayLayer->m_isPaused = false;

@@ -14,9 +14,6 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
     if (!playLayer || !playLayer->m_player1) return false;
     if (playLayer->m_hasCompletedLevel) return true;
     if (playLayer->m_player1->getPositionX() >= levelLength) return true;
-    float endX = playLayer->getEndPosition().x;
-    if (endX > startX + 50.0f && playLayer->m_player1->getPositionX() >= endX) return true;
-    if (playLayer->getCurrentPercent() >= 99.9f) return true;
     return false;
 }
 
@@ -52,16 +49,16 @@ void SwarmSolver::start(PlayLayer* playLayer) {
         }
     }
 
-    float endX = playLayer->getEndPosition().x;
-    if (endX > m_startX + 50.0f && endX <= maxObjX + 300.0f) {
-        m_levelLength = endX;
-    } else if (maxObjX > m_startX + 50.0f) {
-        m_levelLength = maxObjX + 80.0f;
-    } else if (endX > m_startX + 50.0f) {
-        m_levelLength = endX;
+    if (maxObjX > m_startX + 50.0f) {
+        m_levelLength = maxObjX + 100.0f;
     } else {
-        // Blank level with no objects
-        m_levelLength = m_startX + 600.0f;
+        float endX = playLayer->getEndPosition().x;
+        if (endX > m_startX + 50.0f) {
+            m_levelLength = endX;
+        } else {
+            // Blank level with no objects
+            m_levelLength = m_startX + 600.0f;
+        }
     }
     m_maxReachedX = m_startX;
     m_currentTick = 0;
@@ -398,6 +395,8 @@ void SwarmSolver::simulateBot(
     bool completed = false;
     float xNearEnd = checkpoint.startX;
 
+    float prevX = playLayer->m_player1->getPositionX();
+
     for (uint32_t step = 0; step < horizonTicks; ++step) {
         // Track position near end of segment to detect wall jams
         if (step + 10 == horizonTicks) {
@@ -421,6 +420,10 @@ void SwarmSolver::simulateBot(
         // Step physics
         playLayer->update(HeadlessEngine::FIXED_DT);
 
+        // Keep camera locked to player position so RobTop's active section collision structures update
+        playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+        playLayer->updateVisibility(HeadlessEngine::FIXED_DT);
+
         // Check if finished level
         if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
             completed = true;
@@ -441,6 +444,20 @@ void SwarmSolver::simulateBot(
             playLayer->m_player1->m_isDead = false;
             return;
         }
+
+        // Wall jam detection: if cube horizontal movement is stopped by a solid block
+        float currentX = playLayer->m_player1->getPositionX();
+        if (step > 4 && currentX <= prevX + 0.001f) {
+            bot.survived = false;
+            bot.finalX = currentX;
+            bot.deathTick = checkpoint.startTick + step;
+            playLayer->handleButton(false, 1, true);
+            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            playLayer->m_playerDied = false;
+            playLayer->m_player1->m_isDead = false;
+            return;
+        }
+        prevX = currentX;
     }
 
     if (!completed && isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
