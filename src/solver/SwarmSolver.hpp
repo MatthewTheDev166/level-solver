@@ -37,7 +37,8 @@ private:
         uint32_t startTick,
         uint32_t horizonTicks,
         const std::vector<SwarmBot>& previousSurvivors,
-        uint32_t waveRetryCount
+        uint32_t waveRetryCount,
+        float playerSpeed = 1.0f
     );
 
     // Rollout a single bot through the horizon

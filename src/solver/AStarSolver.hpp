@@ -12,6 +12,11 @@
 
 namespace solver {
 
+/**
+ * AStarSolver: Forward state-space A* tree search with spatial hashing.
+ * Note: SwarmSolver (Genetic Swarm) is the primary solver driving TelemetryPopup.
+ * AStarSolver is retained as a deterministic reference implementation.
+ */
 class AStarSolver {
 public:
     static constexpr float ALPHA_ACTION_SWITCH = 0.5f;

@@ -241,13 +241,6 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
             playLayer->handleButton(act.pressed, 1, true);
             // Immediately flush button queue into physics engine so input takes effect on this exact 240Hz substep
             playLayer->processQueuedButtons(0.00416667f, false);
-            if (playLayer->m_player1) {
-                if (act.pressed) {
-                    playLayer->m_player1->pushButton(PlayerButton::Jump);
-                } else {
-                    playLayer->m_player1->releaseButton(PlayerButton::Jump);
-                }
-            }
             m_isDispatchingInput = false;
             m_lastButtonState = act.pressed;
         }

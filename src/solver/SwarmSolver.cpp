@@ -240,7 +240,8 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     uint32_t startTick,
     uint32_t horizonTicks,
     const std::vector<SwarmBot>& previousSurvivors,
-    uint32_t waveRetryCount
+    uint32_t waveRetryCount,
+    float playerSpeed
 ) {
     std::vector<SwarmBot> population;
     population.reserve(m_currentPopulationSize);
@@ -280,12 +281,21 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
             std::vector<TickAction> mutated = parent.segmentActions;
 
             if (!parent.survived && parent.deathTick > startTick) {
-                // Targeted mutation: bot died at deathTick, so inject an evasive jump just prior to death!
+                // Targeted mutation: bot died at deathTick, so inject an evasive jump prior to death!
+                // Scale lead window based on player speed so triple spikes and tight obstacles have enough takeoff distance
                 uint32_t localDeath = parent.deathTick - startTick;
-                uint32_t preLead = 2 + (s_rng() % 16);
+                float spd = playerSpeed > 0.1f ? playerSpeed : 1.0f;
+                uint32_t minLead = static_cast<uint32_t>(16.0f * spd);
+                uint32_t maxLeadSpan = static_cast<uint32_t>(36.0f * spd);
+                uint32_t preLead = minLead + (s_rng() % (maxLeadSpan + 1));
                 if (localDeath > preLead) {
                     uint32_t jumpT = localDeath - preLead;
-                    uint32_t dur = 6 + (s_rng() % 28);
+                    uint32_t dur = (mode == VehicleMode::Robot) ? (16 + (s_rng() % 24)) : (mode == VehicleMode::Cube ? 24 : 10);
+                    mutated.push_back({ jumpT, true });
+                    mutated.push_back({ std::min(jumpT + dur, horizonTicks > 0 ? horizonTicks - 1 : 0), false });
+                } else if (localDeath > 6) {
+                    uint32_t jumpT = localDeath - 6;
+                    uint32_t dur = (mode == VehicleMode::Robot) ? 20 : 12;
                     mutated.push_back({ jumpT, true });
                     mutated.push_back({ std::min(jumpT + dur, horizonTicks > 0 ? horizonTicks - 1 : 0), false });
                 }
@@ -362,29 +372,32 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     } else {
         // Discrete mode (Cube, Ball, Robot, Spider):
         // Systematic Full-Horizon Grid Coverage.
-        // Step jump start ticks every 2 ticks with alternating phase so every single 240Hz tick is evaluated
         uint32_t phase = (waveRetryCount + m_backtrackCount) % 2;
 
-        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks && population.size() < m_currentPopulationSize - 25; jumpAt += 2) {
-            // Short tap (6 ticks): micro-hops, orbs, pink pads, mini-cube
-            addBotWithActions({ { jumpAt, true }, { jumpAt + 6, false } });
-
-            // Standard jump (18 ticks): single and double spikes
-            if (jumpAt + 18 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 18, false } });
+        if (mode == VehicleMode::Robot) {
+            // Robot jump height depends on button hold length:
+            // Low hop (10 ticks), medium (22 ticks), full high jump / triple spike clearance (36 ticks)
+            for (uint32_t jumpAt = phase; jumpAt + 8 < horizonTicks && population.size() < static_cast<size_t>(m_currentPopulationSize * 0.75f); jumpAt += 4) {
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 10, false } }); // low hop
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 22, false } }); // medium jump
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 36, false } }); // full jump (clears triple spikes)
             }
-
-            // Full / triple spike hold (34 ticks)
-            if (jumpAt + 34 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 34, false } });
+        } else {
+            // Cube, Ball, Spider:
+            // Jump arc is invariant to hold duration. Single clean jump candidates span the ENTIRE horizon.
+            // Stepping by 2 ticks with alternating phase guarantees every 240Hz tick is evaluated across 2 waves.
+            for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks && population.size() < static_cast<size_t>(m_currentPopulationSize * 0.70f); jumpAt += 2) {
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 14, false } });
+                // Periodic long hold (every 8 ticks) to test buffer-jumping into consecutive obstacles
+                if ((jumpAt % 8) == phase) {
+                    addBotWithActions({ { jumpAt, true }, { std::min(jumpAt + 48, horizonTicks > 0 ? horizonTicks - 1 : 0), false } });
+                }
             }
-
-            // Long hold across remainder of horizon
-            addBotWithActions({ { jumpAt, true } });
         }
 
-        // Multi-jump combinations across the horizon
-        for (uint32_t j1 = phase; j1 + 30 < horizonTicks && population.size() < m_currentPopulationSize - 10; j1 += 12) {
+        // Multi-jump combinations across the horizon (orb taps and double jumps)
+        for (uint32_t j1 = phase; j1 + 30 < horizonTicks && population.size() < m_currentPopulationSize - 12; j1 += 12) {
+            // Mid-air orb / pad tap combination
             uint32_t j2 = j1 + 22;
             addBotWithActions({
                 { j1, true },
@@ -392,13 +405,14 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 { j2, true },
                 { std::min(j2 + 12, horizonTicks - 1), false }
             });
-            if (j1 + 50 < horizonTicks) {
-                uint32_t j3 = j1 + 35;
+            // Consecutive ground jump landing combination (approx. 46 ticks between jumps)
+            if (j1 + 55 < horizonTicks) {
+                uint32_t jLanding = j1 + 46;
                 addBotWithActions({
                     { j1, true },
-                    { j1 + 20, false },
-                    { j3, true },
-                    { std::min(j3 + 20, horizonTicks - 1), false }
+                    { j1 + 16, false },
+                    { jLanding, true },
+                    { std::min(jLanding + 16, horizonTicks - 1), false }
                 });
             }
         }
@@ -665,7 +679,14 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     if (m_activePopulation.empty() || m_currentBotIndex >= m_activePopulation.size()) {
         m_activeWaveIndex++;
         const auto& seeds = (currentCp.failedWaves > 0 && !m_partialProgressSeeds.empty()) ? m_partialProgressSeeds : currentCp.runnerUps;
-        m_activePopulation = generatePopulation(mode, currentCp.startTick, horizonTicks, seeds, currentCp.failedWaves);
+        m_activePopulation = generatePopulation(
+            mode,
+            currentCp.startTick,
+            horizonTicks,
+            seeds,
+            currentCp.failedWaves,
+            currentCp.snapshot.playerSpeed
+        );
         m_currentBotIndex = 0;
         m_currentWaveSurvivors.clear();
         m_currentHorizonTicks = horizonTicks;
