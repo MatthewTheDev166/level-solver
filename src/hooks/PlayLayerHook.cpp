@@ -110,6 +110,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
                     badge->setString(fmt::format("[REPLAY BOT] Armed ({} inputs ready on start)",
                         solver::MacroManager::get().getTotalActions()).c_str());
                     badge->setColor({ 255, 200, 0 });
+                } else if (solver::MacroManager::get().isReplaying()) {
+                    badge->setVisible(true);
+                    badge->setString("[REPLAY BOT] Inputs Complete (Rolling to end)");
+                    badge->setColor({ 100, 220, 255 });
                 } else {
                     badge->setVisible(false);
                 }
