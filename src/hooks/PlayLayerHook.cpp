@@ -207,10 +207,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void playEndAnimationToPos(cocos2d::CCPoint position) {
         if (solver::HeadlessEngine::get().isHeadless()) {
-            bool isPlat = this->m_level && this->m_level->isPlatformer();
-            if (isPlat || (this->m_player1 && this->m_player1->getPositionX() >= (this->m_endPosition.x - 150.0f))) {
-                this->m_hasCompletedLevel = true;
-            }
+            this->m_hasCompletedLevel = true;
             return;
         }
         PlayLayer::playEndAnimationToPos(position);
@@ -226,10 +223,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void showEndLayer() {
         if (solver::HeadlessEngine::get().isHeadless()) {
-            bool isPlat = this->m_level && this->m_level->isPlatformer();
-            if (isPlat || (this->m_player1 && this->m_player1->getPositionX() >= (this->m_endPosition.x - 150.0f))) {
-                this->m_hasCompletedLevel = true;
-            }
+            this->m_hasCompletedLevel = true;
             return;
         }
         PlayLayer::showEndLayer();
@@ -237,10 +231,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
 
     void levelComplete() {
         if (solver::HeadlessEngine::get().isHeadless()) {
-            bool isPlat = this->m_level && this->m_level->isPlatformer();
-            if (isPlat || (this->m_player1 && this->m_player1->getPositionX() >= (this->m_endPosition.x - 150.0f))) {
-                this->m_hasCompletedLevel = true;
-            }
+            this->m_hasCompletedLevel = true;
             return;
         }
         PlayLayer::levelComplete();

@@ -294,7 +294,7 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
             if (sample.tick == m_playbackTick) {
                 float dx = std::abs(playLayer->m_player1->getPositionX() - sample.x);
                 float dy = std::abs(playLayer->m_player1->getPositionY() - sample.y);
-                if (dx > 1.0f || dy > 1.0f) {
+                if (dx > 3.0f || dy > 3.0f) {
                     if (!m_desyncLogged) {
                         m_desyncLogged = true;
                         m_hasDesync = true;

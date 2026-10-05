@@ -58,16 +58,15 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
     if (playLayer->m_level && playLayer->m_level->isPlatformer()) {
         return playLayer->m_hasCompletedLevel;
     }
+    if (playLayer->m_hasCompletedLevel) return true;
+
     float currentX = playLayer->m_player1->getPositionX();
-
-    // RobTop 100% level percent calculation
-    float percent = playLayer->getCurrentPercent();
-    if (percent >= 99.5f && currentX >= (levelLength - 100.0f)) {
-        return true;
-    }
-
     if (currentX >= levelLength) return true;
-    if (playLayer->m_hasCompletedLevel && currentX >= (levelLength - 100.0f)) return true;
+    if (levelLength > startX + 50.0f && currentX >= (levelLength - 15.0f)) return true;
+
+    float percent = playLayer->getCurrentPercent();
+    if (percent >= 99.0f) return true;
+
     return false;
 }
 
@@ -112,16 +111,14 @@ void BeamSolver::start(PlayLayer* playLayer) {
         }
     }
 
-    if (maxObjX > m_startX + 50.0f) {
-        m_levelLength = maxObjX + 100.0f;
+    float robtopEndX = playLayer->getEndPosition().x;
+    if (robtopEndX > m_startX + 50.0f) {
+        m_levelLength = robtopEndX;
+    } else if (maxObjX > m_startX + 50.0f) {
+        m_levelLength = maxObjX;
     } else {
-        float endX = playLayer->getEndPosition().x;
-        if (endX > m_startX + 50.0f) {
-            m_levelLength = endX;
-        } else {
-            // Blank level with no objects
-            m_levelLength = m_startX + 600.0f;
-        }
+        // Blank level with no objects
+        m_levelLength = m_startX + 600.0f;
     }
     m_maxReachedX = m_startX;
     m_currentTick = 0;
@@ -152,7 +149,9 @@ void BeamSolver::start(PlayLayer* playLayer) {
         playLayer->m_anticheatSpike->setPosition({-9999.0f, -9999.0f});
     }
 
-    playLayer->m_endPosition = cocos2d::CCPoint{ m_levelLength, 0.0f };
+    if (playLayer->m_endPosition.x <= m_startX + 50.0f) {
+        playLayer->m_endPosition = cocos2d::CCPoint{ m_levelLength, 0.0f };
+    }
     playLayer->m_hasCompletedLevel = false;
 
     if (playLayer->m_checkpointArray) {
@@ -358,11 +357,21 @@ bool BeamSolver::runSelfTest(PlayLayer* playLayer) {
 
 void BeamSolver::triggerRewind(PlayLayer* playLayer) {
     m_rewindCount++;
-    m_stuckX = m_maxReachedX;
     m_ticksSinceProgress = 0;
 
+    bool sameStuck = (m_stuckX > 0.0f && std::abs(m_maxReachedX - m_stuckX) < 25.0f);
+    m_stuckX = m_maxReachedX;
+
     // Double search width up to 1536
-    m_currentWidth = std::min(m_currentWidth * 2, static_cast<size_t>(1536));
+    if (m_currentWidth < 1536) {
+        m_currentWidth = std::min(m_currentWidth * 2, static_cast<size_t>(1536));
+    } else if (sameStuck || (m_rewindCount % 2 == 0)) {
+        // At maximum width or repeatedly stuck near the same spot:
+        // Pop the current layer to rewind progressively deeper!
+        if (!m_savedLayers.empty()) {
+            m_savedLayers.pop_back();
+        }
+    }
 
     if (m_savedLayers.empty()) {
         // Rewind to root
@@ -381,18 +390,13 @@ void BeamSolver::triggerRewind(PlayLayer* playLayer) {
         root.clearance = 100.0f;
         m_frontier.push_back(std::move(root));
         m_currentTick = 0;
-        geode::log::warn("[LevelSolver] Frontier wiped out, rewinding to ROOT with W={} (rewind #{})",
+        m_maxReachedX = m_startX;
+        geode::log::warn("[LevelSolver] Rewinding to ROOT with W={} (rewind #{})",
             m_currentWidth, m_rewindCount);
         return;
     }
 
-    // Pop the latest layer if we died at or before its tick, otherwise take the layer before it
     SavedLayer targetLayer = m_savedLayers.back();
-    if (m_savedLayers.size() > 1 && targetLayer.layerTick >= (m_currentTick > 60 ? m_currentTick - 60 : 0)) {
-        m_savedLayers.pop_back();
-        targetLayer = m_savedLayers.back();
-    }
-
     m_frontier = targetLayer.nodes;
     m_currentTick = targetLayer.layerTick;
 
@@ -473,12 +477,12 @@ void BeamSolver::finalizeSolution(PlayLayer* playLayer, const BeamNode& winningN
             lastSimBtn = currBtn;
         }
 
-        playLayer->update(HeadlessEngine::FIXED_DT);
-        playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-
         if (t % 60 == 0) {
             trajectory.push_back({ t, playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY() });
         }
+
+        playLayer->update(HeadlessEngine::FIXED_DT);
+        playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
 
         bool dead = playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied;
         if (dead) {
@@ -664,14 +668,10 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 child.x = playLayer->m_player1->getPositionX();
                 child.y = playLayer->m_player1->getPositionY();
 
-                // Checkpoint creation:
-                // Create native checkpoint every 48 ticks or inherit from parent
-                if ((child.tick % 48 == 0) || !parentNode.checkpoint) {
-                    child.checkpoint = playLayer->createCheckpoint();
-                    if (child.checkpoint) child.checkpoint->retain();
-                } else {
-                    child.checkpoint = parentNode.checkpoint;
-                    if (child.checkpoint) child.checkpoint->retain();
+                // Create native checkpoint for every child to guarantee 100% collision sweep & physics accuracy
+                child.checkpoint = playLayer->createCheckpoint();
+                if (child.checkpoint) {
+                    child.checkpoint->retain();
                 }
 
                 // Register into arena
@@ -725,37 +725,48 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             break;
         }
 
-        // Height-stratified pruning: keep at most m_currentWidth nodes
-        std::vector<BeamNode> newFrontier;
-        newFrontier.reserve(std::min(uniqueChildren.size(), m_currentWidth));
+        // Separate ground nodes and airborne nodes to preserve ground agency
+        std::vector<BeamNode> groundNodes;
+        std::vector<BeamNode> airNodes;
+        for (auto& pair : uniqueChildren) {
+            if (pair.second.p1.isOnGround) {
+                groundNodes.push_back(std::move(pair.second));
+            } else {
+                airNodes.push_back(std::move(pair.second));
+            }
+        }
 
-        if (uniqueChildren.size() <= m_currentWidth) {
-            for (auto& pair : uniqueChildren) {
-                newFrontier.push_back(std::move(pair.second));
+        std::vector<BeamNode> newFrontier;
+        newFrontier.reserve(m_currentWidth);
+
+        // Keep all valid ground states (at most 2-4 nodes: button down/up, mini, etc.)
+        for (auto& gn : groundNodes) {
+            newFrontier.push_back(std::move(gn));
+        }
+
+        size_t airSlots = (m_currentWidth > newFrontier.size()) ? (m_currentWidth - newFrontier.size()) : 1;
+        if (airNodes.size() <= airSlots) {
+            for (auto& an : airNodes) {
+                newFrontier.push_back(std::move(an));
             }
         } else {
-            std::vector<BeamNode> candidates;
-            candidates.reserve(uniqueChildren.size());
-            for (auto& pair : uniqueChildren) {
-                candidates.push_back(std::move(pair.second));
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const BeamNode& a, const BeamNode& b) {
+            std::sort(airNodes.begin(), airNodes.end(), [](const BeamNode& a, const BeamNode& b) {
                 return a.y < b.y;
             });
 
-            size_t total = candidates.size();
-            for (size_t b = 0; b < m_currentWidth; ++b) {
-                size_t startIdx = (b * total) / m_currentWidth;
-                size_t endIdx = ((b + 1) * total) / m_currentWidth;
+            size_t total = airNodes.size();
+            for (size_t b = 0; b < airSlots; ++b) {
+                size_t startIdx = (b * total) / airSlots;
+                size_t endIdx = ((b + 1) * total) / airSlots;
                 size_t bestIdx = startIdx;
-                float bestClearance = candidates[startIdx].clearance;
+                float bestClearance = airNodes[startIdx].clearance;
                 for (size_t i = startIdx + 1; i < endIdx && i < total; ++i) {
-                    if (candidates[i].clearance > bestClearance) {
-                        bestClearance = candidates[i].clearance;
+                    if (airNodes[i].clearance > bestClearance) {
+                        bestClearance = airNodes[i].clearance;
                         bestIdx = i;
                     }
                 }
-                newFrontier.push_back(std::move(candidates[bestIdx]));
+                newFrontier.push_back(std::move(airNodes[bestIdx]));
             }
         }
 
