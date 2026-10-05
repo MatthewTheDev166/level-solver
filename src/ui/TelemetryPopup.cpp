@@ -1,4 +1,5 @@
 #include "TelemetryPopup.hpp"
+#include "../solver/BeamSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../replay/GDRExporter.hpp"
 #include "../engine/HeadlessEngine.hpp"
@@ -62,8 +63,8 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = Mod::get()->getVersion().toVString();
-    this->setTitle(fmt::format("Genetic Swarm Solver {}", verStr));
+    std::string verStr = "v1.4.0";
+    this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
     auto verBadge = CCLabelBMFont::create(verStr.c_str(), "chatFont.fnt");
@@ -95,24 +96,24 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     m_mainLayer->addChild(m_horizonLabel);
     yOffset -= lineHeight + 4.0f;
 
-    // Wave / Checkpoint label
-    m_waveLabel = CCLabelBMFont::create("Wave Generation: #0 | Checkpoint Depth: 0", "chatFont.fnt");
+    // Frontier / Width label
+    m_waveLabel = CCLabelBMFont::create("Frontier: 0 nodes | Search Width: 96", "chatFont.fnt");
     m_waveLabel->setScale(0.80f);
     m_waveLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_waveLabel->setPosition({ xOffset, yOffset });
     m_mainLayer->addChild(m_waveLabel);
     yOffset -= lineHeight;
 
-    // Population / Survivors label
-    m_populationLabel = CCLabelBMFont::create("Swarm Population: 100 bots | Survivors: 0", "chatFont.fnt");
+    // Deepest Tick / Progress label
+    m_populationLabel = CCLabelBMFont::create("Progress: 0.0% | Deepest: tick 0", "chatFont.fnt");
     m_populationLabel->setScale(0.80f);
     m_populationLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_populationLabel->setPosition({ xOffset, yOffset });
     m_mainLayer->addChild(m_populationLabel);
     yOffset -= lineHeight;
 
-    // Backtrack count label
-    m_backtrackLabel = CCLabelBMFont::create("Dead-End Backtracks: 0 rewinds", "chatFont.fnt");
+    // Rewinds / Stuck position label
+    m_backtrackLabel = CCLabelBMFont::create("Stuck at: None | Rewinds: 0", "chatFont.fnt");
     m_backtrackLabel->setScale(0.80f);
     m_backtrackLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_backtrackLabel->setPosition({ xOffset, yOffset });
@@ -216,17 +217,17 @@ void TelemetryPopup::update(float dt) {
         eglView->showCursor(true);
     }
 
-    // If running in background, advance headless swarm search batch
-    if (SwarmSolver::get().isRunning() && m_headlessPlayLayer) {
+    // If running in background, advance headless beam search batch
+    if (BeamSolver::get().isRunning() && m_headlessPlayLayer) {
         ActiveLayerScope scope(m_headlessPlayLayer);
-        SwarmSolver::get().stepSwarmBatch(m_headlessPlayLayer, HeadlessEngine::get().getBatchSize());
+        BeamSolver::get().stepBeamBatch(m_headlessPlayLayer, HeadlessEngine::get().getBatchSize());
     }
 
-    auto telemetry = SwarmSolver::get().getTelemetry();
+    auto telemetry = BeamSolver::get().getTelemetry();
 
     // Update status & print errors clearly on the menu
     if (telemetry.status == SolverStatus::Solved) {
-        m_statusLabel->setString("Status: Solved (100%) - Route saved to disk!");
+        m_statusLabel->setString(telemetry.isVerified ? "Status: Solved (100% Verified)!" : "Status: Solved (100%)");
         m_statusLabel->setColor({ 0, 255, 128 });
         m_startButton->setEnabled(true);
         m_stopButton->setEnabled(false);
@@ -236,14 +237,14 @@ void TelemetryPopup::update(float dt) {
         if (!telemetry.detailMessage.empty()) {
             err += telemetry.detailMessage;
         } else {
-            err += "Search space exhausted";
+            err += "Search failed";
         }
         m_statusLabel->setString(err.c_str());
         m_statusLabel->setColor({ 255, 60, 60 });
         m_startButton->setEnabled(true);
         m_stopButton->setEnabled(false);
     } else if (telemetry.status == SolverStatus::Searching) {
-        std::string statusText = "Status: Swarm Searching";
+        std::string statusText = "Status: Searching";
         if (!telemetry.detailMessage.empty()) {
             statusText += " - " + telemetry.detailMessage;
         }
@@ -257,24 +258,23 @@ void TelemetryPopup::update(float dt) {
     // Update horizon %
     m_horizonLabel->setString(fmt::format("Exploration Horizon: {:.1f}%", telemetry.explorationHorizon).c_str());
 
-    // Update wave & checkpoints
-    if (telemetry.status == SolverStatus::Searching) {
-        m_waveLabel->setString(fmt::format("Wave Generation: #{} (Bot {}/{}) | Depth: {}",
-            telemetry.activeWave, telemetry.currentBotIndex, telemetry.populationSize, telemetry.checkpointDepth).c_str());
-        m_populationLabel->setString(fmt::format("Swarm: {} bots | Live Survivors: {} (Prev: {})",
-            telemetry.populationSize, telemetry.currentSurvivors, telemetry.survivorCount).c_str());
+    // Update frontier & width
+    m_waveLabel->setString(fmt::format("Frontier: {} nodes | Search Width: {} | Rewinds: {}",
+        telemetry.frontierSize, telemetry.currentWidth, telemetry.rewindCount).c_str());
+
+    // Update deepest progress
+    m_populationLabel->setString(fmt::format("Progress: {:.1f}% | Deepest: tick {}",
+        telemetry.explorationHorizon, telemetry.deepestTick).c_str());
+
+    // Update stuck X / rewinds
+    if (telemetry.stuckX > 0.0f) {
+        m_backtrackLabel->setString(fmt::format("Stuck near X: {:.1f} | Rewinds: {}", telemetry.stuckX, telemetry.rewindCount).c_str());
     } else {
-        m_waveLabel->setString(fmt::format("Wave Generation: #{} | Checkpoint Depth: {}",
-            telemetry.activeWave, telemetry.checkpointDepth).c_str());
-        m_populationLabel->setString(fmt::format("Swarm Population: {} bots | Survivors: {}",
-            telemetry.populationSize, telemetry.survivorCount).c_str());
+        m_backtrackLabel->setString(fmt::format("Active Search | Rewinds: {}", telemetry.rewindCount).c_str());
     }
 
-    // Update backtracks
-    m_backtrackLabel->setString(fmt::format("Dead-End Backtracks: {} rewinds", telemetry.backtrackCount).c_str());
-
     // Memory footprint
-    float memMB = static_cast<float>(telemetry.memoryFootprintBytes) / (1024.0f * 1024.0f);
+    float memMB = static_cast<float>(telemetry.frontierSize * sizeof(BeamNode)) / (1024.0f * 1024.0f);
     m_memoryLabel->setString(fmt::format("Memory Footprint: {:.2f} MB", memMB).c_str());
 
     // Throughput
@@ -283,10 +283,15 @@ void TelemetryPopup::update(float dt) {
     // Macro status
     int levelID = m_level ? m_level->m_levelID.value() : 0;
     std::string levelName = m_level ? m_level->m_levelName : "";
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || BeamSolver::get().isCompleted();
     if (m_macroStatusLabel) {
-        m_macroStatusLabel->setString(hasSavedMacro ? "Saved Macro: Available on Disk (Ready to Replay)" : "Saved Macro: None Found");
-        m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
+        if (hasSavedMacro) {
+            m_macroStatusLabel->setString(telemetry.isVerified ? "Saved Macro: Available on Disk (Verified 100%)" : "Saved Macro: Available on Disk (Ready to Replay)");
+            m_macroStatusLabel->setColor({ 100, 255, 100 });
+        } else {
+            m_macroStatusLabel->setString("Saved Macro: None Found");
+            m_macroStatusLabel->setColor({ 180, 180, 180 });
+        }
     }
 
     // Ensure all labels fit cleanly inside the popup box without overflowing
@@ -301,7 +306,7 @@ void TelemetryPopup::update(float dt) {
     fitLabel(m_macroStatusLabel, maxLabelW, 0.70f);
 
     // Button states
-    bool isSearching = SwarmSolver::get().isRunning();
+    bool isSearching = BeamSolver::get().isRunning();
     setButtonVisualState(m_startButton, !isSearching);
     setButtonVisualState(m_stopButton, isSearching);
     setButtonVisualState(m_replayButton, hasSavedMacro && !isSearching);
@@ -313,8 +318,8 @@ TelemetryPopup::~TelemetryPopup() {
 }
 
 void TelemetryPopup::cleanupHeadless() {
-    if (SwarmSolver::get().isRunning()) {
-        SwarmSolver::get().stop();
+    if (BeamSolver::get().isRunning()) {
+        BeamSolver::get().stop();
     }
     if (m_headlessPlayLayer) {
         if (auto gm = GameManager::sharedState()) {
@@ -347,7 +352,7 @@ void TelemetryPopup::onClose(cocos2d::CCObject* sender) {
 void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
     if (!m_level) return;
 
-    if (SwarmSolver::get().isRunning()) return;
+    if (BeamSolver::get().isRunning()) return;
 
     if (m_level->isPlatformer()) {
         m_statusLabel->setString("Status: Platformer unsupported");
@@ -436,13 +441,13 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         m_headlessPlayLayer->m_player1 ? m_headlessPlayLayer->m_player1->getPositionY() : -1.0f
     );
 
-    // Start SwarmSolver on the headless playLayer with active layer scope
+    // Start BeamSolver on the headless playLayer with active layer scope
     {
         ActiveLayerScope scope(m_headlessPlayLayer);
-        SwarmSolver::get().start(m_headlessPlayLayer);
+        BeamSolver::get().start(m_headlessPlayLayer);
     }
 
-    m_statusLabel->setString("Status: Swarm Searching");
+    m_statusLabel->setString("Status: Searching");
     m_statusLabel->setColor({ 0, 255, 128 });
     setButtonVisualState(m_startButton, false);
     setButtonVisualState(m_stopButton, true);
@@ -451,13 +456,13 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
 }
 
 void TelemetryPopup::onStopSolver(cocos2d::CCObject* sender) {
-    SwarmSolver::get().stop();
+    BeamSolver::get().stop();
     m_statusLabel->setString("Status: Stopped by user");
     m_statusLabel->setColor({ 255, 200, 0 });
 
     int levelID = m_level ? m_level->m_levelID.value() : 0;
     std::string levelName = m_level ? m_level->m_levelName : "";
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || BeamSolver::get().isCompleted();
     setButtonVisualState(m_startButton, true);
     setButtonVisualState(m_stopButton, false);
     setButtonVisualState(m_replayButton, hasSavedMacro);
@@ -469,13 +474,14 @@ void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
+    if (!MacroManager::get().hasMacro(levelID, levelName) && !BeamSolver::get().isCompleted()) {
         FLAlertLayer::create("No Macro", "No solved macro found for this level to export.", "OK")->show();
         return;
     }
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
-        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+    if (!MacroManager::get().hasMacro(levelID, levelName) && BeamSolver::get().isCompleted()) {
+        MacroManager::get().setActions(BeamSolver::get().getResolvedMacro());
+        MacroManager::get().setTrajectory(BeamSolver::get().getTrajectory());
         MacroManager::get().saveMacro(levelID, levelName);
     } else {
         MacroManager::get().loadMacro(levelID, levelName);
@@ -519,13 +525,14 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
+    if (!MacroManager::get().hasMacro(levelID, levelName) && !BeamSolver::get().isCompleted()) {
         FLAlertLayer::create("No Macro", "No solved macro found for this level.", "OK")->show();
         return;
     }
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
-        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+    if (!MacroManager::get().hasMacro(levelID, levelName) && BeamSolver::get().isCompleted()) {
+        MacroManager::get().setActions(BeamSolver::get().getResolvedMacro());
+        MacroManager::get().setTrajectory(BeamSolver::get().getTrajectory());
         MacroManager::get().saveMacro(levelID, levelName);
     } else {
         MacroManager::get().loadMacro(levelID, levelName);

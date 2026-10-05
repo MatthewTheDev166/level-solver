@@ -14,6 +14,7 @@ MacroManager& MacroManager::get() {
 
 void MacroManager::clear() {
     m_actions.clear();
+    m_trajectorySamples.clear();
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_totalTicks = 0;
@@ -21,6 +22,9 @@ void MacroManager::clear() {
     m_lastButtonState = false;
     m_isDispatchingInput = false;
     m_replaySessionActive = false;
+    m_hasDesync = false;
+    m_desyncLogged = false;
+    m_desyncTick = 0;
     m_armedLevelID = 0;
     m_armedLevelName.clear();
 }
@@ -82,16 +86,27 @@ std::filesystem::path MacroManager::getMacroPath(int levelID, const std::string&
 bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
     try {
         auto filePath = getMacroPath(levelID, levelName);
-        std::vector<matjson::Value> rootArray;
 
+        std::vector<matjson::Value> inputArray;
         for (const auto& action : m_actions) {
             matjson::Value obj;
             obj["tick"] = static_cast<double>(action.tick);
             obj["pressed"] = action.pressed;
-            rootArray.push_back(std::move(obj));
+            inputArray.push_back(std::move(obj));
         }
 
-        matjson::Value root = rootArray;
+        std::vector<matjson::Value> trajArray;
+        for (const auto& sample : m_trajectorySamples) {
+            matjson::Value obj;
+            obj["tick"] = static_cast<double>(sample.tick);
+            obj["x"] = static_cast<double>(sample.x);
+            obj["y"] = static_cast<double>(sample.y);
+            trajArray.push_back(std::move(obj));
+        }
+
+        matjson::Value root = matjson::Object();
+        root["inputs"] = std::move(inputArray);
+        root["trajectory"] = std::move(trajArray);
 
         std::ofstream file(filePath);
         if (!file.is_open()) {
@@ -101,7 +116,8 @@ bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
 
         file << root.dump(matjson::NO_INDENTATION);
         file.close();
-        geode::log::info("[LevelSolver] Successfully saved {} inputs to {}", m_actions.size(), filePath.string());
+        geode::log::info("[LevelSolver] Successfully saved {} inputs (and {} trajectory points) to {}",
+            m_actions.size(), m_trajectorySamples.size(), filePath.string());
         return true;
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception saving macro: {}", e.what());
@@ -123,25 +139,46 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
         file.close();
 
         auto parsed = matjson::parse(content);
-        if (!parsed.isOk() || !parsed.unwrap().isArray()) {
+        if (!parsed.isOk()) {
             geode::log::error("[LevelSolver] Failed to parse macro JSON from {}", filePath.string());
             return false;
         }
 
+        auto rootVal = parsed.unwrap();
         std::vector<TickAction> loaded;
-        for (const auto& item : parsed.unwrap().asArray().unwrap()) {
-            TickAction act;
-            if (item.contains("tick")) {
-                act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+        std::vector<TrajectorySample> loadedTraj;
+
+        if (rootVal.isObject()) {
+            if (rootVal.contains("inputs") && rootVal["inputs"].isArray()) {
+                for (const auto& item : rootVal["inputs"].asArray().unwrap()) {
+                    TickAction act;
+                    if (item.contains("tick")) act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+                    if (item.contains("pressed")) act.pressed = item["pressed"].asBool().unwrapOr(false);
+                    loaded.push_back(act);
+                }
             }
-            if (item.contains("pressed")) {
-                act.pressed = item["pressed"].asBool().unwrapOr(false);
+            if (rootVal.contains("trajectory") && rootVal["trajectory"].isArray()) {
+                for (const auto& item : rootVal["trajectory"].asArray().unwrap()) {
+                    TrajectorySample s;
+                    if (item.contains("tick")) s.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+                    if (item.contains("x")) s.x = static_cast<float>(item["x"].asDouble().unwrapOr(0.0));
+                    if (item.contains("y")) s.y = static_cast<float>(item["y"].asDouble().unwrapOr(0.0));
+                    loadedTraj.push_back(s);
+                }
             }
-            loaded.push_back(act);
+        } else if (rootVal.isArray()) {
+            for (const auto& item : rootVal.asArray().unwrap()) {
+                TickAction act;
+                if (item.contains("tick")) act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+                if (item.contains("pressed")) act.pressed = item["pressed"].asBool().unwrapOr(false);
+                loaded.push_back(act);
+            }
         }
 
         setActions(loaded);
-        geode::log::info("[LevelSolver] Loaded {} inputs from {}", m_actions.size(), filePath.string());
+        m_trajectorySamples = loadedTraj;
+        geode::log::info("[LevelSolver] Loaded {} inputs (and {} trajectory points) from {}",
+            m_actions.size(), m_trajectorySamples.size(), filePath.string());
         return !m_actions.empty();
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception loading macro: {}", e.what());
@@ -206,6 +243,9 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
+    m_hasDesync = false;
+    m_desyncLogged = false;
+    m_desyncTick = 0;
     // Set directly to Playing so that subsequent attempts (respawns, restarts) start playing immediately
     m_state = ReplayState::Playing;
 
@@ -219,6 +259,9 @@ void MacroManager::onGameStart(PlayLayer* playLayer) {
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
+    m_hasDesync = false;
+    m_desyncLogged = false;
+    m_desyncTick = 0;
     m_state = ReplayState::Playing;
 
     CheatAPIIntegrator::notifyCheatStarted();
@@ -244,6 +287,27 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
         }
     }
 
+    // Check position parity against recorded simulation trajectory
+    if (!m_trajectorySamples.empty()) {
+        for (const auto& sample : m_trajectorySamples) {
+            if (sample.tick == m_playbackTick) {
+                float dx = std::abs(playLayer->m_player1->getPositionX() - sample.x);
+                float dy = std::abs(playLayer->m_player1->getPositionY() - sample.y);
+                if (dx > 1.0f || dy > 1.0f) {
+                    if (!m_desyncLogged) {
+                        m_desyncLogged = true;
+                        m_hasDesync = true;
+                        m_desyncTick = m_playbackTick;
+                        geode::log::warn("[LevelSolver] DESYNC at tick {}: expected ({:.1f}, {:.1f}) got ({:.1f}, {:.1f})",
+                            m_playbackTick, sample.x, sample.y,
+                            playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY());
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     m_playbackTick++;
 
     if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
@@ -258,7 +322,6 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     if (playLayer && m_lastButtonState) {
         m_isDispatchingInput = true;
         playLayer->handleButton(false, 1, true);
-        playLayer->processQueuedButtons(0.00416667f, false);
         if (playLayer->m_player1) {
             playLayer->m_player1->releaseButton(PlayerButton::Jump);
         }
@@ -270,6 +333,9 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     m_lastButtonState = false;
     m_playbackTick = 0;
     m_playbackIndex = 0;
+    m_hasDesync = false;
+    m_desyncLogged = false;
+    m_desyncTick = 0;
     CheatAPIIntegrator::notifyCheatEnded();
     geode::log::info("[LevelSolver] Replay stopped and disarmed");
 }

@@ -1,12 +1,13 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/FMODAudioEngine.hpp>
 #include "../core/DeterministicPRNG.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../engine/HeadlessEngine.hpp"
 #include "../solver/AStarSolver.hpp"
-#include "../solver/SwarmSolver.hpp"
+#include "../solver/BeamSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../ui/TelemetryPopup.hpp"
 
@@ -51,9 +52,15 @@ static void updateReplayBadge(PlayLayer* pl) {
         uint32_t totTick = solver::MacroManager::get().getTotalTicks();
         size_t curAct = solver::MacroManager::get().getCurrentActionIndex();
         size_t totAct = solver::MacroManager::get().getTotalActions();
-        badge->setString(fmt::format("[REPLAY BOT] 240 TPS | Tick: {}/{} | Inputs: {}/{}",
-            curTick, totTick, curAct, totAct).c_str());
-        badge->setColor({ 0, 255, 128 });
+        if (solver::MacroManager::get().hasDesync()) {
+            badge->setString(fmt::format("[REPLAY BOT] DESYNC DETECTED at tick {} (Inputs: {}/{})",
+                solver::MacroManager::get().getDesyncTick(), curAct, totAct).c_str());
+            badge->setColor({ 255, 60, 60 });
+        } else {
+            badge->setString(fmt::format("[REPLAY BOT] 240 TPS | Tick: {}/{} | Inputs: {}/{}",
+                curTick, totTick, curAct, totAct).c_str());
+            badge->setColor({ 0, 255, 128 });
+        }
     } else if (solver::MacroManager::get().isArmed()) {
         badge->setVisible(true);
         badge->setString(fmt::format("[REPLAY BOT] Armed ({} inputs ready on start)",
@@ -67,6 +74,23 @@ static void updateReplayBadge(PlayLayer* pl) {
         badge->setVisible(false);
     }
 }
+
+class $modify(SolverPlayerObject, PlayerObject) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("PlayerObject::playerDestroyed", geode::Priority::First);
+    }
+
+    void playerDestroyed(bool noEffects) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            this->m_isDead = true;
+            if (auto pl = PlayLayer::get()) {
+                pl->m_playerDied = true;
+            }
+            return;
+        }
+        PlayerObject::playerDestroyed(noEffects);
+    }
+};
 
 class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
@@ -112,6 +136,10 @@ class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
 };
 
 class $modify(SolverPlayLayer, PlayLayer) {
+    static void onModify(auto& self) {
+        (void)self.setHookPriority("PlayLayer::destroyPlayer", geode::Priority::First);
+    }
+
     ~SolverPlayLayer() {
         solver::MacroManager::get().stopReplay();
     }
@@ -219,8 +247,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
-        if (solver::SwarmSolver::get().isRunning()) {
-            solver::SwarmSolver::get().stop();
+        if (solver::BeamSolver::get().isRunning()) {
+            solver::BeamSolver::get().stop();
         }
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();

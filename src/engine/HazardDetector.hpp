@@ -21,6 +21,9 @@ public:
     static bool isOrb(GameObject* obj);
     static bool isDashOrb(GameObject* obj);
 
+    static bool hasHazards();
+    static bool isNearAnyObject(float currentX, float windowDistance);
+
     static void buildIndex(cocos2d::CCArray* objects);
     static void clearIndex();
 
@@ -45,6 +48,7 @@ public:
 private:
     static inline std::unordered_map<int, std::vector<GameObject*>> s_hazardBuckets;
     static inline std::unordered_map<int, std::vector<GameObject*>> s_interactableBuckets;
+    static inline std::unordered_map<int, std::vector<GameObject*>> s_blockBuckets;
     static inline bool s_hasIndex = false;
 };
 

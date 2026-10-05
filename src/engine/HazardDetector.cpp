@@ -69,6 +69,43 @@ bool HazardDetector::isOrb(GameObject* obj) {
     }
 }
 
+bool HazardDetector::hasHazards() {
+    return !s_hazardBuckets.empty();
+}
+
+bool HazardDetector::isNearAnyObject(float currentX, float windowDistance) {
+    if (!s_hasIndex) return true;
+    int minB = static_cast<int>(std::floor((currentX - 20.0f) / BUCKET_WIDTH));
+    int maxB = static_cast<int>(std::floor((currentX + windowDistance) / BUCKET_WIDTH));
+    for (int b = minB; b <= maxB; ++b) {
+        auto itH = s_hazardBuckets.find(b);
+        if (itH != s_hazardBuckets.end()) {
+            for (auto obj : itH->second) {
+                if (obj && obj->getPositionX() >= currentX - 10.0f && obj->getPositionX() <= currentX + windowDistance) {
+                    return true;
+                }
+            }
+        }
+        auto itI = s_interactableBuckets.find(b);
+        if (itI != s_interactableBuckets.end()) {
+            for (auto obj : itI->second) {
+                if (obj && obj->getPositionX() >= currentX - 10.0f && obj->getPositionX() <= currentX + windowDistance) {
+                    return true;
+                }
+            }
+        }
+        auto itB = s_blockBuckets.find(b);
+        if (itB != s_blockBuckets.end()) {
+            for (auto obj : itB->second) {
+                if (obj && obj->getPositionX() >= currentX - 10.0f && obj->getPositionX() <= currentX + windowDistance) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
     clearIndex();
     if (!objects) return;
@@ -82,9 +119,11 @@ void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
 
         if (isHazardObject(obj)) {
             s_hazardBuckets[bucket].push_back(obj);
-        }
-        if (isInteractableOrbOrPad(obj)) {
+        } else if (isInteractableOrbOrPad(obj)) {
             s_interactableBuckets[bucket].push_back(obj);
+        } else {
+            // Track solid blocks, portals, and other structural obstacles
+            s_blockBuckets[bucket].push_back(obj);
         }
     }
     s_hasIndex = true;
@@ -93,6 +132,7 @@ void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
 void HazardDetector::clearIndex() {
     s_hazardBuckets.clear();
     s_interactableBuckets.clear();
+    s_blockBuckets.clear();
     s_hasIndex = false;
 }
 

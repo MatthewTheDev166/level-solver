@@ -44,6 +44,11 @@ public:
     bool isReplaySessionActive() const;
     void setReplaySessionActive(bool active);
 
+    void setTrajectory(const std::vector<TrajectorySample>& trajectory) { m_trajectorySamples = trajectory; }
+    const std::vector<TrajectorySample>& getTrajectory() const { return m_trajectorySamples; }
+    bool hasDesync() const { return m_hasDesync; }
+    uint32_t getDesyncTick() const { return m_desyncTick; }
+
     uint32_t getCurrentPlaybackTick() const;
     size_t getCurrentActionIndex() const;
     size_t getTotalActions() const;
@@ -59,6 +64,7 @@ private:
     MacroManager() = default;
 
     std::vector<TickAction> m_actions;
+    std::vector<TrajectorySample> m_trajectorySamples;
     ReplayState m_state = ReplayState::Idle;
     uint32_t m_playbackTick = 0;
     size_t m_playbackIndex = 0;
@@ -66,6 +72,9 @@ private:
     bool m_lastButtonState = false;
     bool m_isDispatchingInput = false;
     bool m_replaySessionActive = false;
+    bool m_hasDesync = false;
+    bool m_desyncLogged = false;
+    uint32_t m_desyncTick = 0;
 
     int m_armedLevelID = 0;
     std::string m_armedLevelName;

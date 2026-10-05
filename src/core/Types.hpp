@@ -34,6 +34,12 @@ struct TickAction {
     }
 };
 
+struct TrajectorySample {
+    uint32_t tick = 0;
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
 enum class SolverStatus {
     Idle,
     Searching,
@@ -48,19 +54,28 @@ struct TelemetryMetrics {
     float explorationHorizon = 0.0f; // 0.0 to 100.0%
     float currentX = 0.0f;
     float targetEndX = 0.0f;
+    size_t frontierSize = 0;
+    size_t currentWidth = 96;
+    size_t rewindCount = 0;
+    uint32_t deepestTick = 0;
+    float stuckX = 0.0f;
+    float ticksPerSecond = 0.0f;
+    bool isVerified = false;
+
+    // Compatibility fields
     size_t openNodes = 0;
     size_t exploredNodes = 0;
     size_t prunedStates = 0;
     size_t memoryFootprintBytes = 0;
     size_t nearbyObstacles = 0;
-    float ticksPerSecond = 0.0f;
     uint32_t activeWave = 0;
-    size_t populationSize = 100;
+    size_t populationSize = 96;
     size_t survivorCount = 0;
     size_t currentBotIndex = 0;
     size_t currentSurvivors = 0;
     size_t checkpointDepth = 0;
     size_t backtrackCount = 0;
+
     SolverStatus status = SolverStatus::Idle;
     std::string detailMessage = "Ready";
 };
@@ -265,6 +280,84 @@ struct BeamCheckpoint {
         }
         return *this;
     }
+};
+
+struct ArenaNode {
+    int32_t parentIndex = -1;
+    uint32_t tick = 0;
+    bool buttonDown = false;
+};
+
+struct BeamNode {
+    CheckpointObject* checkpoint = nullptr;
+    PlayerSnapshot p1;
+    PlayerSnapshot p2;
+    bool hasP2 = false;
+    uint32_t tick = 0;
+    int32_t arenaIndex = -1;
+    bool buttonDown = false;
+    float clearance = 100.0f;
+    float x = 0.0f;
+    float y = 0.0f;
+
+    BeamNode() = default;
+
+    ~BeamNode() {
+        if (checkpoint) {
+            checkpoint->release();
+            checkpoint = nullptr;
+        }
+    }
+
+    BeamNode(const BeamNode& other) {
+        *this = other;
+    }
+
+    BeamNode& operator=(const BeamNode& other) {
+        if (this != &other) {
+            if (checkpoint) checkpoint->release();
+            checkpoint = other.checkpoint;
+            if (checkpoint) checkpoint->retain();
+            p1 = other.p1;
+            p2 = other.p2;
+            hasP2 = other.hasP2;
+            tick = other.tick;
+            arenaIndex = other.arenaIndex;
+            buttonDown = other.buttonDown;
+            clearance = other.clearance;
+            x = other.x;
+            y = other.y;
+        }
+        return *this;
+    }
+
+    BeamNode(BeamNode&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    BeamNode& operator=(BeamNode&& other) noexcept {
+        if (this != &other) {
+            if (checkpoint) checkpoint->release();
+            checkpoint = other.checkpoint;
+            other.checkpoint = nullptr;
+            p1 = other.p1;
+            p2 = other.p2;
+            hasP2 = other.hasP2;
+            tick = other.tick;
+            arenaIndex = other.arenaIndex;
+            buttonDown = other.buttonDown;
+            clearance = other.clearance;
+            x = other.x;
+            y = other.y;
+        }
+        return *this;
+    }
+};
+
+struct SavedLayer {
+    uint32_t layerTick = 0;
+    float maxReachedX = 0.0f;
+    std::vector<BeamNode> nodes;
 };
 
 } // namespace solver
