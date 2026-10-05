@@ -8,7 +8,7 @@
 	},
 	"id": "matthew.level-solver",
 	"name": "Level Solver",
-	"version": "v1.2.0",
+	"version": "v1.2.1",
 	"developer": "Matthew",
 	"description": "Autonomous in-engine level solver using A* forward state search and 240 TPS headless simulation stepping.",
 	"dependencies": {
