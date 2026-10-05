@@ -27,8 +27,10 @@ static void setButtonVisualState(CCMenuItemSpriteExtra* btn, bool enabled) {
     if (auto sprite = btn->getNormalImage()) {
         cocos2d::ccColor3B col = enabled ? cocos2d::ccColor3B{255, 255, 255} : cocos2d::ccColor3B{120, 120, 120};
         GLubyte op = enabled ? 255 : 130;
-        sprite->setColor(col);
-        sprite->setOpacity(op);
+        if (auto rgba = typeinfo_cast<CCRGBAProtocol*>(sprite)) {
+            rgba->setColor(col);
+            rgba->setOpacity(op);
+        }
         if (auto btnSpr = typeinfo_cast<ButtonSprite*>(sprite)) {
             if (auto lbl = btnSpr->m_label) {
                 lbl->setColor(col);
