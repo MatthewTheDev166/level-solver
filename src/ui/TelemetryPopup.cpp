@@ -149,6 +149,27 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
     m_mainLayer->addChild(m_macroStatusLabel);
 
+    // Checkbox for toggling HUD display during replay playback
+    auto hudMenu = CCMenu::create();
+    hudMenu->setPosition({ xOffset, 62.0f });
+    m_mainLayer->addChild(hudMenu);
+
+    m_hudToggler = CCMenuItemToggler::createWithStandardSprites(
+        this,
+        menu_selector(TelemetryPopup::onToggleShowHUD),
+        0.65f
+    );
+    bool showHUD = Mod::get()->getSavedValue<bool>("show-replay-hud", true);
+    m_hudToggler->toggle(showHUD);
+    m_hudToggler->setPosition({ 10.0f, 0.0f });
+    hudMenu->addChild(m_hudToggler);
+
+    auto hudLabel = CCLabelBMFont::create("Show HUD on Replay", "chatFont.fnt");
+    hudLabel->setScale(0.70f);
+    hudLabel->setAnchorPoint({ 0.0f, 0.5f });
+    hudLabel->setPosition({ 26.0f, 0.0f });
+    hudMenu->addChild(hudLabel);
+
     // Control buttons menu
     auto buttonMenu = CCMenu::create();
     buttonMenu->setPosition({ 242.5f, 35.0f });
@@ -471,6 +492,14 @@ void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
     }
 }
 
+void TelemetryPopup::onToggleShowHUD(cocos2d::CCObject* sender) {
+    auto toggler = typeinfo_cast<CCMenuItemToggler*>(sender);
+    if (!toggler) return;
+    bool showHUD = toggler->isOn();
+    Mod::get()->setSavedValue("show-replay-hud", showHUD);
+    geode::log::info("[LevelSolver] Replay HUD visibility toggled: {}", showHUD);
+}
+
 void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     if (!m_level) return;
     int levelID = m_level->m_levelID.value();
@@ -488,9 +517,11 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         MacroManager::get().loadMacro(levelID, levelName);
     }
 
+    // Explicitly activate replay session so it persists across respawns and restarts
+    MacroManager::get().setReplaySessionActive(true);
     MacroManager::get().armReplay(levelID, levelName);
 
-    // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
+    // If currently inside an active scene PlayLayer
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
         cleanupHeadless();
         if (auto scene = cocos2d::CCDirector::sharedDirector()->getRunningScene()) {

@@ -282,10 +282,10 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
             if (!parent.survived && parent.deathTick > startTick) {
                 // Targeted mutation: bot died at deathTick, so inject an evasive jump just prior to death!
                 uint32_t localDeath = parent.deathTick - startTick;
-                uint32_t preLead = 4 + (s_rng() % 14);
+                uint32_t preLead = 2 + (s_rng() % 16);
                 if (localDeath > preLead) {
                     uint32_t jumpT = localDeath - preLead;
-                    uint32_t dur = 6 + (s_rng() % 24);
+                    uint32_t dur = 6 + (s_rng() % 28);
                     mutated.push_back({ jumpT, true });
                     mutated.push_back({ std::min(jumpT + dur, horizonTicks > 0 ? horizonTicks - 1 : 0), false });
                 }
@@ -362,10 +362,10 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     } else {
         // Discrete mode (Cube, Ball, Robot, Spider):
         // Systematic Full-Horizon Grid Coverage.
-        // We step jump start ticks across the ENTIRE horizon [0, horizonTicks - 4] with adaptive headroom to avoid starvation
-        uint32_t phase = (waveRetryCount * 3 + m_backtrackCount * 5) % 4;
+        // Step jump start ticks every 2 ticks with alternating phase so every single 240Hz tick is evaluated
+        uint32_t phase = (waveRetryCount + m_backtrackCount) % 2;
 
-        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks && population.size() < m_currentPopulationSize - 25; jumpAt += 4) {
+        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks && population.size() < m_currentPopulationSize - 25; jumpAt += 2) {
             // Short tap (6 ticks): micro-hops, orbs, pink pads, mini-cube
             addBotWithActions({ { jumpAt, true }, { jumpAt + 6, false } });
 

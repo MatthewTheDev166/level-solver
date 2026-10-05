@@ -41,6 +41,8 @@ public:
     bool isPlaying() const;
     bool isReplaying() const;
     bool isDispatchingInput() const;
+    bool isReplaySessionActive() const;
+    void setReplaySessionActive(bool active);
 
     uint32_t getCurrentPlaybackTick() const;
     size_t getCurrentActionIndex() const;
@@ -63,6 +65,7 @@ private:
     uint32_t m_totalTicks = 0;
     bool m_lastButtonState = false;
     bool m_isDispatchingInput = false;
+    bool m_replaySessionActive = false;
 
     int m_armedLevelID = 0;
     std::string m_armedLevelName;

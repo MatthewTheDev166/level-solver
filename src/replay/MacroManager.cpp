@@ -20,6 +20,7 @@ void MacroManager::clear() {
     m_state = ReplayState::Idle;
     m_lastButtonState = false;
     m_isDispatchingInput = false;
+    m_replaySessionActive = false;
     m_armedLevelID = 0;
     m_armedLevelName.clear();
 }
@@ -158,6 +159,7 @@ bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
 void MacroManager::armReplay(int levelID, const std::string& levelName) {
     if (!loadMacro(levelID, levelName) || m_actions.empty()) {
         geode::log::warn("[LevelSolver] Cannot arm replay: macro empty or failed to load");
+        m_replaySessionActive = false;
         return;
     }
 
@@ -167,6 +169,7 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
     m_playbackIndex = 0;
     m_lastButtonState = false;
     m_state = ReplayState::Armed;
+    m_replaySessionActive = true;
 
     CheatAPIIntegrator::notifyCheatStarted();
     geode::log::info("[LevelSolver] Replay armed for level {} ('{}') with {} actions (total ticks: {})",
@@ -174,7 +177,21 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
 }
 
 void MacroManager::onLevelReset(PlayLayer* playLayer) {
-    if (m_state == ReplayState::Idle) return;
+    if (!m_replaySessionActive || m_actions.empty()) {
+        if (playLayer && m_lastButtonState) {
+            m_isDispatchingInput = true;
+            playLayer->handleButton(false, 1, true);
+            if (playLayer->m_player1) {
+                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            }
+            m_isDispatchingInput = false;
+        }
+        m_state = ReplayState::Idle;
+        m_lastButtonState = false;
+        m_playbackTick = 0;
+        m_playbackIndex = 0;
+        return;
+    }
 
     // Safety release: ensure no lingering jump state across attempts
     if (playLayer) {
@@ -189,17 +206,15 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
-    m_state = ReplayState::Armed;
+    // Set directly to Playing so that subsequent attempts (respawns, restarts) start playing immediately
+    m_state = ReplayState::Playing;
 
-    geode::log::info("[LevelSolver] Replay armed on level reset (ready for new attempt, actions: {})", m_actions.size());
+    CheatAPIIntegrator::notifyCheatStarted();
+    geode::log::info("[LevelSolver] Replay session reset to tick 0 for new attempt ({} actions ready)", m_actions.size());
 }
 
 void MacroManager::onGameStart(PlayLayer* playLayer) {
-    if (m_state != ReplayState::Armed && m_state != ReplayState::Playing) return;
-    if (m_actions.empty()) {
-        m_state = ReplayState::Idle;
-        return;
-    }
+    if (!m_replaySessionActive || m_actions.empty()) return;
 
     m_playbackTick = 0;
     m_playbackIndex = 0;
@@ -224,6 +239,8 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
         if (act.pressed != m_lastButtonState) {
             m_isDispatchingInput = true;
             playLayer->handleButton(act.pressed, 1, true);
+            // Immediately flush button queue into physics engine so input takes effect on this exact 240Hz substep
+            playLayer->processQueuedButtons(0.00416667f, false);
             if (playLayer->m_player1) {
                 if (act.pressed) {
                     playLayer->m_player1->pushButton(PlayerButton::Jump);
@@ -245,11 +262,12 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
 }
 
 void MacroManager::stopReplay(PlayLayer* playLayer) {
-    if (m_state == ReplayState::Idle) return;
+    if (m_state == ReplayState::Idle && !m_replaySessionActive) return;
 
     if (playLayer && m_lastButtonState) {
         m_isDispatchingInput = true;
         playLayer->handleButton(false, 1, true);
+        playLayer->processQueuedButtons(0.00416667f, false);
         if (playLayer->m_player1) {
             playLayer->m_player1->releaseButton(PlayerButton::Jump);
         }
@@ -257,6 +275,7 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     }
 
     m_state = ReplayState::Idle;
+    m_replaySessionActive = false;
     m_lastButtonState = false;
     m_playbackTick = 0;
     m_playbackIndex = 0;
@@ -278,6 +297,14 @@ bool MacroManager::isReplaying() const {
 
 bool MacroManager::isDispatchingInput() const {
     return m_isDispatchingInput;
+}
+
+bool MacroManager::isReplaySessionActive() const {
+    return m_replaySessionActive;
+}
+
+void MacroManager::setReplaySessionActive(bool active) {
+    m_replaySessionActive = active;
 }
 
 uint32_t MacroManager::getCurrentPlaybackTick() const {

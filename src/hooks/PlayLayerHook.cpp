@@ -15,11 +15,22 @@ using namespace geode::prelude;
 static void updateReplayBadge(PlayLayer* pl) {
     if (!pl || solver::HeadlessEngine::get().isHeadless()) return;
 
+    bool showHudPref = geode::Mod::get()->getSavedValue<bool>("show-replay-hud", true);
+    bool isReplaying = solver::MacroManager::get().isReplaySessionActive() &&
+                       (solver::MacroManager::get().isPlaying() || solver::MacroManager::get().isArmed() || solver::MacroManager::get().isReplaying());
+
     // Use m_uiLayer so HUD badge is anchored in screen space and drawn above level graphics
     cocos2d::CCNode* targetParent = pl->m_uiLayer ? static_cast<cocos2d::CCNode*>(pl->m_uiLayer) : static_cast<cocos2d::CCNode*>(pl);
     auto badge = static_cast<cocos2d::CCLabelBMFont*>(targetParent->getChildByTag(108492));
     if (!badge && pl->m_uiLayer) {
         badge = static_cast<cocos2d::CCLabelBMFont*>(pl->getChildByTag(108492));
+    }
+
+    if (!showHudPref || !isReplaying) {
+        if (badge) {
+            badge->setVisible(false);
+        }
+        return;
     }
 
     if (!badge) {
@@ -101,6 +112,10 @@ class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
 };
 
 class $modify(SolverPlayLayer, PlayLayer) {
+    ~SolverPlayLayer() {
+        solver::MacroManager::get().stopReplay();
+    }
+
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) {
             return false;
@@ -109,16 +124,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
         // Clamp engine pseudo-random number generator for determinism
         solver::DeterministicPRNG::clampSeed();
 
-        // Check for existing solved macro for this level
-        if (level && !solver::MacroManager::get().isArmed()) {
-            int levelID = level->m_levelID.value();
-            std::string levelName = level->m_levelName;
-            if (solver::MacroManager::get().hasMacro(levelID, levelName)) {
-                solver::MacroManager::get().armReplay(levelID, levelName);
-            }
-        }
-
-        if (solver::MacroManager::get().isArmed()) {
+        // Only engage replay if explicitly initiated by user via stats popup
+        if (solver::MacroManager::get().isReplaySessionActive()) {
             solver::MacroManager::get().onLevelReset(this);
         }
 
@@ -130,7 +137,9 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void startGame() {
         PlayLayer::startGame();
         if (!solver::HeadlessEngine::get().isHeadless()) {
-            solver::MacroManager::get().onGameStart(this);
+            if (solver::MacroManager::get().isReplaySessionActive()) {
+                solver::MacroManager::get().onGameStart(this);
+            }
             updateReplayBadge(this);
         }
     }
