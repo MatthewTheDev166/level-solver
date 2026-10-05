@@ -204,6 +204,8 @@ struct SwarmBot {
 struct BeamCheckpoint {
     CheckpointObject* nativeCheckpoint = nullptr; // RobTop's full practice mode checkpoint
     PlayerSnapshot snapshot;                      // Native physics snapshot at segment start
+    PlayerSnapshot snapshot2;                     // Native physics snapshot for Player 2 (dual mode)
+    bool hasPlayer2 = false;
     uint32_t startTick = 0;                       // Starting tick of this checkpoint
     float startX = 0.0f;                          // X coordinate at segment start
     std::vector<TickAction> macroHistory;         // Global inputs accumulated to this point
@@ -230,6 +232,8 @@ struct BeamCheckpoint {
             nativeCheckpoint = other.nativeCheckpoint;
             if (nativeCheckpoint) nativeCheckpoint->retain();
             snapshot = other.snapshot;
+            snapshot2 = other.snapshot2;
+            hasPlayer2 = other.hasPlayer2;
             startTick = other.startTick;
             startX = other.startX;
             macroHistory = other.macroHistory;
@@ -250,6 +254,8 @@ struct BeamCheckpoint {
             nativeCheckpoint = other.nativeCheckpoint;
             other.nativeCheckpoint = nullptr;
             snapshot = other.snapshot;
+            snapshot2 = other.snapshot2;
+            hasPlayer2 = other.hasPlayer2;
             startTick = other.startTick;
             startX = other.startX;
             macroHistory = std::move(other.macroHistory);

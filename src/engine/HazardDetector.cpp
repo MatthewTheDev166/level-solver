@@ -42,6 +42,33 @@ bool HazardDetector::isInteractableOrbOrPad(GameObject* obj) {
     }
 }
 
+bool HazardDetector::isDashOrb(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    return (type == GameObjectType::DashRing || type == GameObjectType::GravityDashRing);
+}
+
+bool HazardDetector::isOrb(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    switch (type) {
+        case GameObjectType::YellowJumpRing:
+        case GameObjectType::PinkJumpRing:
+        case GameObjectType::GravityRing:
+        case GameObjectType::GreenRing:
+        case GameObjectType::DropRing:
+        case GameObjectType::RedJumpRing:
+        case GameObjectType::CustomRing:
+        case GameObjectType::DashRing:
+        case GameObjectType::GravityDashRing:
+        case GameObjectType::SpiderOrb:
+        case GameObjectType::TeleportOrb:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void HazardDetector::buildIndex(cocos2d::CCArray* objects) {
     clearIndex();
     if (!objects) return;
@@ -176,6 +203,44 @@ bool HazardDetector::isNearInteractable(
     }
 
     return false;
+}
+
+std::vector<GameObject*> HazardDetector::getInteractablesInWindow(
+    float minX,
+    float maxX,
+    cocos2d::CCArray* objects
+) {
+    std::vector<GameObject*> result;
+    if (s_hasIndex) {
+        int minBucket = static_cast<int>(std::floor(minX / BUCKET_WIDTH));
+        int maxBucket = static_cast<int>(std::floor(maxX / BUCKET_WIDTH));
+
+        for (int b = minBucket; b <= maxBucket; ++b) {
+            auto it = s_interactableBuckets.find(b);
+            if (it == s_interactableBuckets.end()) continue;
+
+            for (GameObject* obj : it->second) {
+                if (!obj) continue;
+                float x = obj->getPositionX();
+                if (x >= minX && x <= maxX) {
+                    result.push_back(obj);
+                }
+            }
+        }
+        return result;
+    }
+
+    if (!objects) return result;
+
+    for (unsigned int i = 0; i < objects->count(); ++i) {
+        auto obj = static_cast<GameObject*>(objects->objectAtIndex(i));
+        if (!obj) continue;
+        float x = obj->getPositionX();
+        if (x >= minX && x <= maxX && isInteractableOrbOrPad(obj)) {
+            result.push_back(obj);
+        }
+    }
+    return result;
 }
 
 } // namespace solver

@@ -18,6 +18,8 @@ public:
 
     static bool isHazardObject(GameObject* obj);
     static bool isInteractableOrbOrPad(GameObject* obj);
+    static bool isOrb(GameObject* obj);
+    static bool isDashOrb(GameObject* obj);
 
     static void buildIndex(cocos2d::CCArray* objects);
     static void clearIndex();
@@ -32,6 +34,12 @@ public:
         const cocos2d::CCPoint& playerPos,
         cocos2d::CCArray* objects,
         float interactionRadius = 80.0f
+    );
+
+    static std::vector<GameObject*> getInteractablesInWindow(
+        float minX,
+        float maxX,
+        cocos2d::CCArray* objects
     );
 
 private:

@@ -38,7 +38,9 @@ private:
         uint32_t horizonTicks,
         const std::vector<SwarmBot>& previousSurvivors,
         uint32_t waveRetryCount,
-        float playerSpeed = 1.0f
+        float playerSpeed = 1.0f,
+        float startX = 0.0f,
+        cocos2d::CCArray* levelObjects = nullptr
     );
 
     // Rollout a single bot through the horizon
