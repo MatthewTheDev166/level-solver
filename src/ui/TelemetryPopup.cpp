@@ -349,6 +349,20 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
 
     if (SwarmSolver::get().isRunning()) return;
 
+    if (m_level->isPlatformer()) {
+        m_statusLabel->setString("Status: Platformer unsupported");
+        m_statusLabel->setColor({ 255, 60, 60 });
+        FLAlertLayer::create("Unsupported Mode", "Platformer mode is not supported by Level Solver.", "OK")->show();
+        return;
+    }
+
+    if (m_level->m_twoPlayerMode) {
+        m_statusLabel->setString("Status: 2-Player unsupported");
+        m_statusLabel->setColor({ 255, 60, 60 });
+        FLAlertLayer::create("Unsupported Mode", "2-Player mode is not supported by Level Solver.", "OK")->show();
+        return;
+    }
+
     // Immediately notify CheatAPI to safeguard leaderboards
     CheatAPIIntegrator::notifyCheatStarted();
 

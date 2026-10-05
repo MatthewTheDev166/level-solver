@@ -92,7 +92,9 @@ float HazardDetector::calculateClearance(
                 float dy = objPos.y - playerPos.y;
 
                 if (std::abs(dx) <= EVALUATION_RADIUS_X && std::abs(dy) <= EVALUATION_RADIUS_Y) {
-                    nearbyObstacleCountOut++;
+                    if (dx >= -25.0f) {
+                        nearbyObstacleCountOut++;
+                    }
                     float distSq = dx * dx + dy * dy;
                     if (distSq < minDistanceSq) {
                         minDistanceSq = distSq;
@@ -114,9 +116,10 @@ float HazardDetector::calculateClearance(
         float dy = objPos.y - playerPos.y;
 
         if (std::abs(dx) <= EVALUATION_RADIUS_X && std::abs(dy) <= EVALUATION_RADIUS_Y) {
-            nearbyObstacleCountOut++;
-
             if (isHazardObject(obj)) {
+                if (dx >= -25.0f) {
+                    nearbyObstacleCountOut++;
+                }
                 float distSq = dx * dx + dy * dy;
                 if (distSq < minDistanceSq) {
                     minDistanceSq = distSq;
@@ -148,7 +151,7 @@ bool HazardDetector::isNearInteractable(
                 cocos2d::CCPoint objPos = obj->getPosition();
                 float dx = objPos.x - playerPos.x;
                 float dy = objPos.y - playerPos.y;
-                if (dx * dx + dy * dy <= radiusSq) {
+                if (dx >= -25.0f && (dx * dx + dy * dy <= radiusSq)) {
                     return true;
                 }
             }
@@ -166,7 +169,7 @@ bool HazardDetector::isNearInteractable(
             cocos2d::CCPoint objPos = obj->getPosition();
             float dx = objPos.x - playerPos.x;
             float dy = objPos.y - playerPos.y;
-            if (dx * dx + dy * dy <= radiusSq) {
+            if (dx >= -25.0f && (dx * dx + dy * dy <= radiusSq)) {
                 return true;
             }
         }

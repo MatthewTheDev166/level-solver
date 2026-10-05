@@ -42,6 +42,15 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     if (!playLayer || !playLayer->m_player1) return;
 
     reset();
+
+    if (playLayer->m_level && (playLayer->m_level->isPlatformer() || playLayer->m_level->m_twoPlayerMode)) {
+        geode::log::warn("[LevelSolver] Platformer and 2-Player modes are unsupported.");
+        m_isRunning = false;
+        m_telemetry.status = SolverStatus::Failed;
+        m_telemetry.detailMessage = "Platformer and 2-Player modes unsupported";
+        return;
+    }
+
     m_isRunning = true;
     m_isCompleted = false;
 
@@ -461,6 +470,13 @@ void SwarmSolver::simulateBot(
     // Position camera
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
 
+    // Ensure clean input queue and player button state before simulation
+    playLayer->m_queuedButtons.clear();
+    if (playLayer->m_player1) {
+        playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        playLayer->m_player1->m_jumpBuffered = false;
+    }
+
     size_t actionIdx = 0;
     bool currentButton = false;
     bool lastButton = false;
@@ -514,6 +530,11 @@ void SwarmSolver::simulateBot(
             }
             playLayer->m_playerDied = false;
             playLayer->m_player1->m_isDead = false;
+            playLayer->m_queuedButtons.clear();
+            if (playLayer->m_player1) {
+                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                playLayer->m_player1->m_jumpBuffered = false;
+            }
             return;
         }
 
@@ -534,6 +555,11 @@ void SwarmSolver::simulateBot(
                 }
                 playLayer->m_playerDied = false;
                 playLayer->m_player1->m_isDead = false;
+                playLayer->m_queuedButtons.clear();
+                if (playLayer->m_player1) {
+                    playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                    playLayer->m_player1->m_jumpBuffered = false;
+                }
                 return;
             }
         } else {
@@ -568,6 +594,7 @@ void SwarmSolver::simulateBot(
     // Clearance score: distance to nearest hazard
     size_t nearbyObs = 0;
     bot.clearance = HazardDetector::calculateClearance(playLayer->m_player1->getPosition(), playLayer->m_objects, nearbyObs);
+    bool hasNearbyInteractable = HazardDetector::isNearInteractable(playLayer->m_player1->getPosition(), playLayer->m_objects, 220.0f);
 
     VehicleMode botMode = checkpoint.snapshot.mode;
     bool isContinuous = (botMode == VehicleMode::Ship || botMode == VehicleMode::Wave || botMode == VehicleMode::Swing || botMode == VehicleMode::UFO);
@@ -576,14 +603,29 @@ void SwarmSolver::simulateBot(
     float progress = isGoingLeft ? (checkpoint.startX - bot.finalX) : (bot.finalX - checkpoint.startX);
     float fitness = progress + (0.05f * bot.clearance);
     if (!isContinuous) {
-        // Small ground bonus (5.0 instead of 50.0) so forward progress always dominates!
-        if (playLayer->m_player1->m_isOnGround) {
-            fitness += 5.0f;
-        } else if (playLayer->m_player1->m_yVelocity < -8.0) {
-            fitness -= 5.0f;
+        // Count active jump presses in this segment
+        size_t jumpCount = 0;
+        for (const auto& act : bot.segmentActions) {
+            if (act.pressed) jumpCount++;
         }
-        // Simplicity bonus: reward minimal inputs when safe
-        fitness += (2.0f / (1.0f + static_cast<float>(bot.segmentActions.size())));
+
+        if (jumpCount == 0) {
+            // Pure idle: strong stability bonus on safe ground
+            fitness += 35.0f;
+        } else if (nearbyObs == 0 && !hasNearbyInteractable) {
+            // Unnecessary jumping on clear ground: heavy penalty to eliminate metronome pattern
+            fitness -= (20.0f * static_cast<float>(jumpCount));
+        } else {
+            // Necessary jump near obstacles or orbs: slight penalty per input to reward minimal actions
+            fitness -= (3.0f * static_cast<float>(jumpCount));
+        }
+
+        // Stable grounded landing preference for checkpoints
+        if (playLayer->m_player1->m_isOnGround) {
+            fitness += 20.0f;
+        } else if (std::abs(playLayer->m_player1->m_yVelocity) > 6.0f) {
+            fitness -= 15.0f; // Airborne falling/flying penalty at segment boundary
+        }
     }
     bot.fitnessScore = fitness;
 
@@ -591,6 +633,11 @@ void SwarmSolver::simulateBot(
     if (lastButton) {
         playLayer->handleButton(false, 1, true);
         lastButton = false;
+    }
+    playLayer->m_queuedButtons.clear();
+    if (playLayer->m_player1) {
+        playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        playLayer->m_player1->m_jumpBuffered = false;
     }
 }
 
