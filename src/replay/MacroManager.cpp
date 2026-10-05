@@ -163,7 +163,7 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
     if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
 
     // Do NOT tick or burn macro actions while the level is still fading in / loading!
-    if (!playLayer->m_hasStarted || playLayer->m_player1->m_isDead) {
+    if (!playLayer->m_started || playLayer->m_player1->m_isDead) {
         m_accumulatedTime = 0.0f;
         m_playbackTick = 0;
         m_playbackIndex = 0;
