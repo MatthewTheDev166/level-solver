@@ -4,26 +4,14 @@ $targetDirs = @(
     "$env:LOCALAPPDATA\GeometryDash\geode\mods"
 )
 
-$candidates = @(
-    "dist\matthew.level-solver.geode",
-    "build\matthew.level-solver.geode",
-    "build\level-solver.geode",
-    "matthew.level-solver.geode"
-)
+# Find newest matthew.level-solver.geode across build-artifact, dist, and build
+$foundFiles = Get-ChildItem -Path . -Filter "matthew.level-solver.geode" -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch "node_modules|\.git" } |
+    Sort-Object LastWriteTime -Descending
 
 $sourceFile = $null
-foreach ($c in $candidates) {
-    if (Test-Path $c) {
-        $sourceFile = (Get-Item $c).FullName
-        break
-    }
-}
-
-if (-not $sourceFile) {
-    $found = Get-ChildItem -Path . -Filter "matthew.level-solver.geode" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($found) {
-        $sourceFile = $found.FullName
-    }
+if ($foundFiles.Count -gt 0) {
+    $sourceFile = $foundFiles[0].FullName
 }
 
 if (-not $sourceFile) {
