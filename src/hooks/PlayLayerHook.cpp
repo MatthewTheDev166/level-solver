@@ -15,8 +15,8 @@ using namespace geode::prelude;
 class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isHalfTick && solver::MacroManager::get().isPlaying()) {
-            if (!this->m_inResetDelay && this->m_started && !this->m_playerDied && this->m_player1 && !this->m_player1->m_isDead) {
-                if (auto pl = static_cast<PlayLayer*>(this)) {
+            if (auto pl = PlayLayer::get()) {
+                if (!pl->m_inResetDelay && pl->m_started && !pl->m_playerDied && pl->m_player1 && !pl->m_player1->m_isDead) {
                     solver::MacroManager::get().stepReplay(pl);
                 }
             }
