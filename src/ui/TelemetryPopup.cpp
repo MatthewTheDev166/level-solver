@@ -228,10 +228,17 @@ void TelemetryPopup::update(float dt) {
     m_horizonLabel->setString(fmt::format("Exploration Horizon: {:.1f}%", telemetry.explorationHorizon).c_str());
 
     // Update wave & checkpoints
-    m_waveLabel->setString(fmt::format("Wave Generation: #{} | Checkpoint Depth: {}", telemetry.activeWave, telemetry.checkpointDepth).c_str());
-
-    // Update population & survivors
-    m_populationLabel->setString(fmt::format("Swarm Population: {} bots | Survivors: {}", telemetry.populationSize, telemetry.survivorCount).c_str());
+    if (telemetry.status == SolverStatus::Searching) {
+        m_waveLabel->setString(fmt::format("Wave Generation: #{} (Bot {}/{}) | Depth: {}",
+            telemetry.activeWave, telemetry.currentBotIndex, telemetry.populationSize, telemetry.checkpointDepth).c_str());
+        m_populationLabel->setString(fmt::format("Swarm: {} bots | Live Survivors: {} (Prev: {})",
+            telemetry.populationSize, telemetry.currentSurvivors, telemetry.survivorCount).c_str());
+    } else {
+        m_waveLabel->setString(fmt::format("Wave Generation: #{} | Checkpoint Depth: {}",
+            telemetry.activeWave, telemetry.checkpointDepth).c_str());
+        m_populationLabel->setString(fmt::format("Swarm Population: {} bots | Survivors: {}",
+            telemetry.populationSize, telemetry.survivorCount).c_str());
+    }
 
     // Update backtracks
     m_backtrackLabel->setString(fmt::format("Dead-End Backtracks: {} rewinds", telemetry.backtrackCount).c_str());
@@ -357,6 +364,10 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         m_headlessPlayLayer->resetLevel();
         m_headlessPlayLayer->startGame();
         m_headlessPlayLayer->m_isPaused = false;
+        m_headlessPlayLayer->m_hasCompletedLevel = false;
+        if (m_headlessPlayLayer->m_checkpointArray) {
+            m_headlessPlayLayer->m_checkpointArray->removeAllObjects();
+        }
         if (m_headlessPlayLayer->m_player1) {
             m_headlessPlayLayer->moveCameraToPos(m_headlessPlayLayer->m_player1->getPosition());
             m_headlessPlayLayer->updateVisibility(0.0f);

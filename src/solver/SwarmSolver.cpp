@@ -12,8 +12,12 @@ namespace solver {
 
 static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float startX) {
     if (!playLayer || !playLayer->m_player1) return false;
-    if (playLayer->m_hasCompletedLevel) return true;
-    if (playLayer->m_player1->getPositionX() >= levelLength) return true;
+    if (playLayer->m_level && playLayer->m_level->isPlatformer()) {
+        return playLayer->m_hasCompletedLevel;
+    }
+    float currentX = playLayer->m_player1->getPositionX();
+    if (currentX >= levelLength) return true;
+    if (playLayer->m_hasCompletedLevel && currentX >= (levelLength - 150.0f)) return true;
     return false;
 }
 
@@ -84,7 +88,12 @@ void SwarmSolver::start(PlayLayer* playLayer) {
         playLayer->m_anticheatSpike->setPosition({-9999.0f, -9999.0f});
     }
 
+    playLayer->m_endPosition = cocos2d::CCPoint{ m_levelLength, 0.0f };
     playLayer->m_hasCompletedLevel = false;
+
+    if (playLayer->m_checkpointArray) {
+        playLayer->m_checkpointArray->removeAllObjects();
+    }
 
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
     playLayer->updateVisibility(0.0f);
@@ -178,6 +187,12 @@ const std::vector<TickAction>& SwarmSolver::getResolvedMacro() const {
 }
 
 void SwarmSolver::finalizeSolution(const std::vector<TickAction>& winningActions) {
+    if (m_maxReachedX < (m_levelLength - 150.0f)) {
+        geode::log::error("[LevelSolver] Refusing premature finalizeSolution: maxReachedX={:.1f} is far from levelLength={:.1f}!",
+            m_maxReachedX, m_levelLength);
+        return;
+    }
+
     m_resolvedMacro = winningActions;
     m_isCompleted = true;
     m_isRunning = false;
@@ -415,10 +430,10 @@ void SwarmSolver::simulateBot(
     playLayer->m_resumeTimer = 0;
     playLayer->m_extraDelta = 0.0;
     playLayer->m_isPaused = false;
+    playLayer->m_hasCompletedLevel = false;
 
     // Position camera
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-    playLayer->updateVisibility(HeadlessEngine::FIXED_DT);
 
     size_t actionIdx = 0;
     bool currentButton = false;
@@ -452,7 +467,6 @@ void SwarmSolver::simulateBot(
 
         // Keep camera locked to player position so RobTop's active section collision structures update
         playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-        playLayer->updateVisibility(HeadlessEngine::FIXED_DT);
 
         // Check if finished level
         if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
@@ -621,7 +635,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     }
 
     auto startBatch = std::chrono::high_resolution_clock::now();
-    const auto timeBudget = std::chrono::milliseconds(16);
+    const auto timeBudget = std::chrono::milliseconds(12);
 
     auto& currentCp = m_checkpointStack.back();
     VehicleMode mode = currentCp.snapshot.mode;
@@ -796,12 +810,20 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     m_telemetry.activeWave = m_activeWaveIndex;
     m_telemetry.populationSize = m_currentPopulationSize;
     m_telemetry.survivorCount = m_lastSurvivorCount;
+    m_telemetry.currentBotIndex = m_currentBotIndex;
+    m_telemetry.currentSurvivors = m_currentWaveSurvivors.size();
     m_telemetry.checkpointDepth = m_checkpointStack.size();
     m_telemetry.backtrackCount = m_backtrackCount;
     m_telemetry.ticksPerSecond = HeadlessEngine::get().getTicksPerSecond();
     m_telemetry.memoryFootprintBytes = m_checkpointStack.size() * sizeof(BeamCheckpoint);
     m_telemetry.status = SolverStatus::Searching;
-    m_telemetry.detailMessage = fmt::format("Wave #{} | Depth {} | Backtracks {}", m_activeWaveIndex, m_checkpointStack.size(), m_backtrackCount);
+    if (currentCp.failedWaves > 0) {
+        m_telemetry.detailMessage = fmt::format("Wave #{} retry (strike {}/10) | Depth {} | Backtracks {}",
+            m_activeWaveIndex, currentCp.failedWaves, m_checkpointStack.size(), m_backtrackCount);
+    } else {
+        m_telemetry.detailMessage = fmt::format("Wave #{} | Depth {} | Backtracks {}",
+            m_activeWaveIndex, m_checkpointStack.size(), m_backtrackCount);
+    }
 }
 
 } // namespace solver

@@ -119,7 +119,10 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
 }
 
 bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
-    return std::filesystem::exists(getMacroPath(levelID, levelName));
+    auto filePath = getMacroPath(levelID, levelName);
+    std::error_code ec;
+    auto size = std::filesystem::file_size(filePath, ec);
+    return !ec && size > 64;
 }
 
 void MacroManager::queueReplay(int levelID, const std::string& levelName) {

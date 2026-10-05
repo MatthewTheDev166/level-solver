@@ -232,7 +232,9 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
         m_openQueue.pop();
 
         // Check if level solved (100%)
-        if (current.snapshot.position.x >= m_levelLength || playLayer->m_hasCompletedLevel) {
+        bool reachedEnd = (current.snapshot.position.x >= m_levelLength) ||
+            (playLayer->m_hasCompletedLevel && current.snapshot.position.x >= (m_levelLength - 150.0f));
+        if (reachedEnd) {
             m_isCompleted = true;
             m_isRunning = false;
             m_telemetry.status = SolverStatus::Solved;

@@ -24,6 +24,7 @@ public:
     bool isRunning() const;
     bool isCompleted() const;
     TelemetryMetrics getTelemetry() const;
+    float getLevelLength() const { return m_levelLength; }
 
     const std::vector<TickAction>& getResolvedMacro() const;
 

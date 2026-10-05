@@ -57,6 +57,8 @@ struct TelemetryMetrics {
     uint32_t activeWave = 0;
     size_t populationSize = 100;
     size_t survivorCount = 0;
+    size_t currentBotIndex = 0;
+    size_t currentSurvivors = 0;
     size_t checkpointDepth = 0;
     size_t backtrackCount = 0;
     SolverStatus status = SolverStatus::Idle;
