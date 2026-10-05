@@ -70,7 +70,7 @@ private:
     uint32_t m_activeWaveIndex = 0;
     uint32_t m_waveRetryCount = 0;
     uint32_t m_backtrackCount = 0;
-    size_t m_currentPopulationSize = 100;
+    size_t m_currentPopulationSize = 160;
     size_t m_lastSurvivorCount = 0;
 
     // Stateful population evaluation across frame budgets

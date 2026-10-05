@@ -103,7 +103,7 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     m_telemetry.currentX = m_startX;
     m_telemetry.targetEndX = m_levelLength;
     m_telemetry.checkpointDepth = 1;
-    m_telemetry.populationSize = 100;
+    m_telemetry.populationSize = m_currentPopulationSize;
     geode::log::info("[LevelSolver] SwarmSolver started at X={:.1f}, target end X={:.1f} (maxObjX={:.1f})", m_startX, m_levelLength, maxObjX);
 }
 
@@ -220,49 +220,57 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
         population.push_back(std::move(b));
     };
 
-    std::mt19937 s_rng(1337 + waveRetryCount * 7919 + startTick * 31);
+    std::mt19937 s_rng(1337 + (waveRetryCount + m_backtrackCount * 17) * 7919 + startTick * 31 + m_activeWaveIndex * 101);
     std::uniform_int_distribution<uint32_t> randDuration(3, 36);
     std::uniform_int_distribution<int> randJitter(-3, 3);
 
-    // 1. Baselines: Idle and Full Hold
+    // 1. Baselines: Pure Idle (crucial for flat ground/safe paths!) and Full Hold
     addBotWithActions({ { 0, false } });
     addBotWithActions({ { 0, true } });
 
     bool isContinuousMode = (mode == VehicleMode::Ship || mode == VehicleMode::Wave || mode == VehicleMode::Swing || mode == VehicleMode::UFO);
 
+    // 2. Genetic breeding / targeted mutations from previous survivors or furthest partial progress bots
     if (!previousSurvivors.empty()) {
-        // GENETIC MUTATION MODE:
-        // Prioritize breeding off existing survivors and runner-ups!
         // Keep top survivors verbatim (elitism)
         for (size_t i = 0; i < previousSurvivors.size() && i < 4; ++i) {
             addBotWithActions(previousSurvivors[i].segmentActions);
         }
 
-        // Generate mutations from survivors (varying jump tick, hold duration, extra taps)
         size_t survivorIdx = 0;
-        size_t mutationBudget = static_cast<size_t>(m_currentPopulationSize * 0.70f);
-        while (population.size() < mutationBudget) {
-            const auto& base = previousSurvivors[survivorIdx % previousSurvivors.size()].segmentActions;
+        size_t mutationBudget = static_cast<size_t>(m_currentPopulationSize * 0.35f);
+        while (population.size() < mutationBudget && survivorIdx < previousSurvivors.size() * 10) {
+            const auto& parent = previousSurvivors[survivorIdx % previousSurvivors.size()];
             survivorIdx++;
 
-            std::vector<TickAction> mutated = base;
-            for (auto& act : mutated) {
-                int newT = static_cast<int>(act.tick) + randJitter(s_rng);
-                act.tick = static_cast<uint32_t>(std::clamp(newT, 0, static_cast<int>(horizonTicks > 0 ? horizonTicks - 1 : 0)));
+            std::vector<TickAction> mutated = parent.segmentActions;
+
+            if (!parent.survived && parent.deathTick > startTick) {
+                // Targeted mutation: bot died at deathTick, so inject an evasive jump just prior to death!
+                uint32_t localDeath = parent.deathTick - startTick;
+                uint32_t preLead = 4 + (s_rng() % 14);
+                if (localDeath > preLead) {
+                    uint32_t jumpT = localDeath - preLead;
+                    uint32_t dur = 6 + (s_rng() % 24);
+                    mutated.push_back({ jumpT, true });
+                    mutated.push_back({ std::min(jumpT + dur, horizonTicks > 0 ? horizonTicks - 1 : 0), false });
+                }
+            } else {
+                // Jitter existing actions
+                for (auto& act : mutated) {
+                    int newT = static_cast<int>(act.tick) + randJitter(s_rng);
+                    act.tick = static_cast<uint32_t>(std::clamp(newT, 0, static_cast<int>(horizonTicks > 0 ? horizonTicks - 1 : 0)));
+                }
+
+                // Mutation: add a tap in the second half of the horizon
+                if (s_rng() % 3 == 0) {
+                    uint32_t tapTick = (horizonTicks / 2) + (s_rng() % (horizonTicks > 2 ? horizonTicks / 2 : 1));
+                    mutated.push_back({ tapTick, true });
+                    mutated.push_back({ std::min(tapTick + 6 + (s_rng() % 16), horizonTicks > 0 ? horizonTicks - 1 : 0), false });
+                }
             }
 
-            // Mutation: add a tap
-            if (s_rng() % 4 == 0) {
-                uint32_t tapTick = s_rng() % (horizonTicks > 10 ? horizonTicks - 10 : 1);
-                mutated.push_back({ tapTick, true });
-                mutated.push_back({ tapTick + 6 + (s_rng() % 12), false });
-            }
-
-            // Mutation: erase an action if oversized
-            if (s_rng() % 4 == 0 && mutated.size() > 2) {
-                mutated.erase(mutated.begin() + (s_rng() % mutated.size()));
-            }
-
+            // Clean and sort mutated actions
             std::sort(mutated.begin(), mutated.end(), [](const TickAction& a, const TickAction& b) {
                 return a.tick < b.tick;
             });
@@ -277,7 +285,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     if (isContinuousMode) {
         // Continuous mode (Ship/Wave/Swing/UFO):
         // Systematic multi-frequency waveforms with phase shifts across wave retries
-        uint32_t phaseOffset = (waveRetryCount * 2) % 16;
+        uint32_t phaseOffset = (waveRetryCount * 3 + m_backtrackCount * 5) % 16;
         for (uint32_t period : { 4u, 6u, 8u, 10u, 12u, 16u, 20u, 24u, 32u }) {
             // 50% duty cycle
             std::vector<TickAction> acts50;
@@ -306,55 +314,70 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 }
                 addBotWithActions(actsFeather);
             }
+
+            // 75% climb duty cycle
+            if (period >= 8) {
+                std::vector<TickAction> actsClimb;
+                for (uint32_t t = phaseOffset; t + (3 * period / 4) < horizonTicks; t += period) {
+                    actsClimb.push_back({ t, true });
+                    actsClimb.push_back({ t + (3 * period / 4), false });
+                }
+                addBotWithActions(actsClimb);
+            }
         }
     } else {
         // Discrete mode (Cube, Ball, Robot, Spider):
-        // Systematic 2-tick phase-shifted grid search across retries
-        uint32_t phase = (waveRetryCount % 2);
+        // Systematic Full-Horizon Grid Coverage.
+        // We step jump start ticks across the ENTIRE horizon [0, horizonTicks - 4] with step 4.
+        uint32_t phase = (waveRetryCount + m_backtrackCount * 3) % 4;
 
-        // Grid jump actions: sweep start ticks with step 2
-        for (uint32_t jumpAt = phase; jumpAt + 6 < horizonTicks; jumpAt += 2) {
-            // Short tap (8 ticks)
-            addBotWithActions({ { jumpAt, true }, { jumpAt + 8, false } });
+        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks; jumpAt += 4) {
+            // Short tap (6 ticks): micro-hops, orbs, pink pads, mini-cube
+            addBotWithActions({ { jumpAt, true }, { jumpAt + 6, false } });
 
-            // Medium jump (20 ticks)
-            if (jumpAt + 20 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 20, false } });
+            // Standard jump (18 ticks): single and double spikes
+            if (jumpAt + 18 < horizonTicks) {
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 18, false } });
+            } else {
+                addBotWithActions({ { jumpAt, true } });
             }
 
-            // Full / triple spike hold (40 ticks)
-            if (jumpAt + 40 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 40, false } });
+            // Full / triple spike hold (38 ticks)
+            if (jumpAt + 38 < horizonTicks) {
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 38, false } });
+            } else {
+                addBotWithActions({ { jumpAt, true } });
             }
 
-            // Micro-tap (4 ticks, for mini-cube and orb buffers) on odd retry waves
-            if ((waveRetryCount % 2 != 0) && jumpAt + 4 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 4, false } });
-            }
-
-            if (population.size() >= static_cast<size_t>(m_currentPopulationSize * 0.70f)) {
-                break;
-            }
+            // Hold across remainder of horizon (useful for Robot or long jumps)
+            addBotWithActions({ { jumpAt, true } });
         }
 
-        // Multi-jump combinations
-        for (uint32_t jumpAt = phase; jumpAt + 36 < horizonTicks; jumpAt += 8) {
+        // Multi-jump combinations across the horizon
+        for (uint32_t j1 = phase; j1 + 30 < horizonTicks; j1 += 12) {
+            uint32_t j2 = j1 + 22;
             addBotWithActions({
-                { jumpAt, true },
-                { jumpAt + 10, false },
-                { jumpAt + 22, true },
-                { jumpAt + 34, false }
+                { j1, true },
+                { j1 + 10, false },
+                { j2, true },
+                { std::min(j2 + 12, horizonTicks - 1), false }
             });
-            if (population.size() >= static_cast<size_t>(m_currentPopulationSize * 0.75f)) {
-                break;
+            if (j1 + 50 < horizonTicks) {
+                uint32_t j3 = j1 + 35;
+                addBotWithActions({
+                    { j1, true },
+                    { j1 + 20, false },
+                    { j3, true },
+                    { std::min(j3 + 20, horizonTicks - 1), false }
+                });
             }
         }
     }
 
-    // Fill remaining ~25-30% of population with fresh stochastic candidates
+    // Fill remaining population with fresh pseudo-random exploratory sequences
     while (population.size() < m_currentPopulationSize) {
         std::vector<TickAction> acts;
-        uint32_t currentT = s_rng() % 8;
+        uint32_t currentT = s_rng() % 10;
         bool state = (s_rng() % 2 == 0);
 
         while (currentT < horizonTicks) {
@@ -485,7 +508,23 @@ void SwarmSolver::simulateBot(
     // Clearance score
     size_t nearbyObs = 0;
     bot.clearance = HazardDetector::calculateClearance(playLayer->m_player1->getPosition(), playLayer->m_objects, nearbyObs);
-    bot.fitnessScore = bot.finalX + (0.05f * bot.clearance);
+
+    VehicleMode botMode = checkpoint.snapshot.mode;
+    bool isContinuous = (botMode == VehicleMode::Ship || botMode == VehicleMode::Wave || botMode == VehicleMode::Swing || botMode == VehicleMode::UFO);
+
+    float fitness = bot.finalX + (0.05f * bot.clearance);
+    if (!isContinuous) {
+        // Grounded bonus: strongly favor states on the floor where player has full jump control
+        if (playLayer->m_player1->m_isOnGround) {
+            fitness += 50.0f;
+        } else if (playLayer->m_player1->m_yVelocity < -1.0) {
+            // Penalize falling mid-air states
+            fitness -= 20.0f;
+        }
+        // Simplicity bonus: reward minimal inputs when on safe terrain
+        fitness += (5.0f / (1.0f + static_cast<float>(bot.segmentActions.size())));
+    }
+    bot.fitnessScore = fitness;
 
     // Release button at end of simulation
     playLayer->handleButton(false, 1, true);
@@ -500,9 +539,10 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         geode::log::warn("[LevelSolver] Backtracking from dead-end at X={:.1f} (remaining depth {})", deadEndCp.startX, m_checkpointStack.size());
 
         auto& parentCp = m_checkpointStack.back();
-        if (parentCp.runnerUpIndex < parentCp.runnerUps.size()) {
-            // Activate alternate surviving runner-up branch!
+        while (parentCp.runnerUpIndex < parentCp.runnerUps.size()) {
             const auto& altBot = parentCp.runnerUps[parentCp.runnerUpIndex++];
+            if (!altBot.survived) continue; // Skip partial survivors during backtrack branching
+
             parentCp.failedWaves = 0;
             geode::log::info("[LevelSolver] Activating runner-up #{} at X={:.1f}", parentCp.runnerUpIndex, parentCp.startX);
 
@@ -531,10 +571,11 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
 
     // At root checkpoint (depth 1, X=0): preserve root indefinitely with fresh stochastic mutations
     if (!m_checkpointStack.empty()) {
+        m_backtrackCount++;
         m_checkpointStack.front().failedWaves = 0;
         m_checkpointStack.front().runnerUpIndex = 0;
         m_checkpointStack.front().runnerUps.clear();
-        geode::log::info("[LevelSolver] At root checkpoint (0%), generating fresh stochastic mutations");
+        geode::log::info("[LevelSolver] At root checkpoint (0%), generating fresh stochastic mutations (epoch {})", m_backtrackCount);
     }
 }
 
@@ -623,10 +664,19 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             const auto& bestBot = m_currentWaveSurvivors.front();
 
-            // Save top alternate runner-ups into current checkpoint
+            // Save diverse top alternate runner-ups into current checkpoint
             currentCp.runnerUps.clear();
-            for (size_t i = 1; i < m_currentWaveSurvivors.size() && i <= 4; ++i) {
-                currentCp.runnerUps.push_back(m_currentWaveSurvivors[i]);
+            for (size_t i = 1; i < m_currentWaveSurvivors.size() && currentCp.runnerUps.size() < 4; ++i) {
+                bool isDuplicate = false;
+                for (const auto& existing : currentCp.runnerUps) {
+                    if (existing.segmentActions == m_currentWaveSurvivors[i].segmentActions) {
+                        isDuplicate = true;
+                        break;
+                    }
+                }
+                if (!isDuplicate) {
+                    currentCp.runnerUps.push_back(m_currentWaveSurvivors[i]);
+                }
             }
             currentCp.runnerUpIndex = 0;
 
@@ -667,12 +717,24 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 m_lastSurvivorCount, m_currentPopulationSize
             );
         } else {
-            // Entire wave evaluated and 0 survivors found: record a strike
+            // Entire wave evaluated and 0 survivors found:
             currentCp.failedWaves++;
-            float waveMaxX = 0.0f;
-            for (const auto& b : m_activePopulation) {
-                if (b.finalX > waveMaxX) waveMaxX = b.finalX;
+
+            // Collect the furthest partial survivors to breed off them on the next wave!
+            std::sort(m_activePopulation.begin(), m_activePopulation.end(), [](const SwarmBot& a, const SwarmBot& b) {
+                return a.finalX > b.finalX;
+            });
+
+            float waveMaxX = m_activePopulation.empty() ? 0.0f : m_activePopulation.front().finalX;
+
+            // Seed top furthest partial bots into runnerUps so generatePopulation breeds from them!
+            currentCp.runnerUps.clear();
+            for (size_t i = 0; i < m_activePopulation.size() && currentCp.runnerUps.size() < 4; ++i) {
+                if (m_activePopulation[i].finalX > currentCp.startX + 10.0f) {
+                    currentCp.runnerUps.push_back(m_activePopulation[i]);
+                }
             }
+
             geode::log::warn("[LevelSolver] Wave #{} wiped out at X={:.1f} (strike {}/10, best reached X={:.1f})",
                 m_activeWaveIndex, currentCp.startX, currentCp.failedWaves, waveMaxX);
 
