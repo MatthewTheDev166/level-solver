@@ -87,26 +87,27 @@ bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
     try {
         auto filePath = getMacroPath(levelID, levelName);
 
-        std::vector<matjson::Value> inputArray;
+        matjson::Value root = matjson::Value::object();
+
+        matjson::Value inputArray = matjson::Value::array();
         for (const auto& action : m_actions) {
-            matjson::Value obj;
+            matjson::Value obj = matjson::Value::object();
             obj["tick"] = static_cast<double>(action.tick);
             obj["pressed"] = action.pressed;
-            inputArray.push_back(std::move(obj));
+            inputArray.push(obj);
         }
 
-        std::vector<matjson::Value> trajArray;
+        matjson::Value trajArray = matjson::Value::array();
         for (const auto& sample : m_trajectorySamples) {
-            matjson::Value obj;
+            matjson::Value obj = matjson::Value::object();
             obj["tick"] = static_cast<double>(sample.tick);
             obj["x"] = static_cast<double>(sample.x);
             obj["y"] = static_cast<double>(sample.y);
-            trajArray.push_back(std::move(obj));
+            trajArray.push(obj);
         }
 
-        matjson::Value root = matjson::Object();
-        root["inputs"] = std::move(inputArray);
-        root["trajectory"] = std::move(trajArray);
+        root["inputs"] = inputArray;
+        root["trajectory"] = trajArray;
 
         std::ofstream file(filePath);
         if (!file.is_open()) {
