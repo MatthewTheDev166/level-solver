@@ -233,7 +233,7 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
         // Check if level solved (100%)
         bool reachedEnd = (current.snapshot.position.x >= m_levelLength) ||
-            (playLayer->m_hasCompletedLevel && current.snapshot.position.x >= (m_levelLength - 150.0f));
+            (playLayer->m_hasCompletedLevel && current.snapshot.position.x >= (m_levelLength - 100.0f));
         if (reachedEnd) {
             m_isCompleted = true;
             m_isRunning = false;

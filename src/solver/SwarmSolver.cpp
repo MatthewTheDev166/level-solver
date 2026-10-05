@@ -16,8 +16,20 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
         return playLayer->m_hasCompletedLevel;
     }
     float currentX = playLayer->m_player1->getPositionX();
+
+    // Physical sanity: a single wave segment horizon cannot jump forward more than 350 units
+    if ((currentX - startX) > 350.0f) {
+        return false;
+    }
+
+    // RobTop 100% level percent calculation
+    float percent = playLayer->getCurrentPercent();
+    if (percent >= 99.5f && currentX >= (levelLength - 100.0f)) {
+        return true;
+    }
+
     if (currentX >= levelLength) return true;
-    if (playLayer->m_hasCompletedLevel && currentX >= (levelLength - 150.0f)) return true;
+    if (playLayer->m_hasCompletedLevel && currentX >= (levelLength - 100.0f)) return true;
     return false;
 }
 
@@ -187,7 +199,7 @@ const std::vector<TickAction>& SwarmSolver::getResolvedMacro() const {
 }
 
 void SwarmSolver::finalizeSolution(const std::vector<TickAction>& winningActions) {
-    if (m_maxReachedX < (m_levelLength - 150.0f)) {
+    if (m_maxReachedX < (m_levelLength - 100.0f)) {
         geode::log::error("[LevelSolver] Refusing premature finalizeSolution: maxReachedX={:.1f} is far from levelLength={:.1f}!",
             m_maxReachedX, m_levelLength);
         return;
@@ -419,9 +431,9 @@ void SwarmSolver::simulateBot(
     // Restore parent checkpoint using RobTop's full practice checkpoint when available
     if (checkpoint.nativeCheckpoint) {
         playLayer->loadFromCheckpoint(checkpoint.nativeCheckpoint);
-    } else {
-        checkpoint.snapshot.restore(playLayer->m_player1);
     }
+    // Unconditionally restore player snapshot so state and position never leak across bots!
+    checkpoint.snapshot.restore(playLayer->m_player1);
 
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;

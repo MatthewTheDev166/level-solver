@@ -62,7 +62,16 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    this->setTitle("Genetic Swarm Solver");
+    std::string verStr = Mod::get()->getVersion().toString();
+    this->setTitle(fmt::format("Genetic Swarm Solver v{}", verStr));
+
+    // Display version in upper corner of stats panel
+    auto verBadge = CCLabelBMFont::create(fmt::format("v{}", verStr).c_str(), "chatFont.fnt");
+    verBadge->setScale(0.70f);
+    verBadge->setAnchorPoint({ 1.0f, 1.0f });
+    verBadge->setPosition({ width - 35.0f, height - 12.0f });
+    verBadge->setColor({ 140, 190, 255 });
+    m_mainLayer->addChild(verBadge);
 
     float yOffset = 215.0f;
     float lineHeight = 18.0f;
