@@ -22,6 +22,7 @@ protected:
     void onStartSolver(cocos2d::CCObject* sender);
     void onStopSolver(cocos2d::CCObject* sender);
     void onReplayMacro(cocos2d::CCObject* sender);
+    void onExportMacro(cocos2d::CCObject* sender);
 
     void cleanupHeadless();
 
@@ -43,6 +44,7 @@ private:
     CCMenuItemSpriteExtra* m_startButton = nullptr;
     CCMenuItemSpriteExtra* m_stopButton = nullptr;
     CCMenuItemSpriteExtra* m_replayButton = nullptr;
+    CCMenuItemSpriteExtra* m_exportButton = nullptr;
 };
 
 } // namespace solver

@@ -21,6 +21,29 @@ static void fitLabel(CCLabelBMFont* label, float maxWidth, float defaultScale) {
     }
 }
 
+static void setButtonVisualState(CCMenuItemSpriteExtra* btn, bool enabled) {
+    if (!btn) return;
+    btn->setEnabled(enabled);
+    if (auto sprite = btn->getNormalImage()) {
+        cocos2d::ccColor3B col = enabled ? cocos2d::ccColor3B{255, 255, 255} : cocos2d::ccColor3B{120, 120, 120};
+        GLubyte op = enabled ? 255 : 130;
+        sprite->setColor(col);
+        sprite->setOpacity(op);
+        if (auto btnSpr = typeinfo_cast<ButtonSprite*>(sprite)) {
+            if (auto lbl = btnSpr->m_label) {
+                lbl->setColor(col);
+                lbl->setOpacity(op);
+            }
+        }
+        for (unsigned int i = 0; i < sprite->getChildrenCount(); ++i) {
+            if (auto child = typeinfo_cast<CCRGBAProtocol*>(sprite->getChildren()->objectAtIndex(i))) {
+                child->setColor(col);
+                child->setOpacity(op);
+            }
+        }
+    }
+}
+
 TelemetryPopup* TelemetryPopup::create(GJGameLevel* level) {
     auto ret = new TelemetryPopup();
     if (ret && ret->init(485.0f, 290.0f, level)) {
@@ -120,24 +143,31 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     buttonMenu->setPosition({ 242.5f, 35.0f });
     m_mainLayer->addChild(buttonMenu);
 
-    // Start button
-    auto startSpr = ButtonSprite::create("Start Solve", "goldFont.fnt", "GJ_button_01.png", 0.75f);
+    // 4 bottom action buttons: Start, Stop, Replay, Export Macro
+    auto startSpr = ButtonSprite::create("Start", "goldFont.fnt", "GJ_button_01.png", 0.70f);
     m_startButton = CCMenuItemSpriteExtra::create(startSpr, this, menu_selector(TelemetryPopup::onStartSolver));
-    m_startButton->setPosition({ -135.0f, 0.0f });
+    m_startButton->setPosition({ -165.0f, 0.0f });
     buttonMenu->addChild(m_startButton);
 
-    // Stop button
-    auto stopSpr = ButtonSprite::create("Stop", "goldFont.fnt", "GJ_button_06.png", 0.75f);
+    auto stopSpr = ButtonSprite::create("Stop", "goldFont.fnt", "GJ_button_06.png", 0.70f);
     m_stopButton = CCMenuItemSpriteExtra::create(stopSpr, this, menu_selector(TelemetryPopup::onStopSolver));
-    m_stopButton->setPosition({ 0.0f, 0.0f });
+    m_stopButton->setPosition({ -55.0f, 0.0f });
     buttonMenu->addChild(m_stopButton);
 
-    // Replay / Export button
-    auto replaySpr = ButtonSprite::create("Replay", "goldFont.fnt", "GJ_button_02.png", 0.75f);
+    auto replaySpr = ButtonSprite::create("Replay", "goldFont.fnt", "GJ_button_02.png", 0.70f);
     m_replayButton = CCMenuItemSpriteExtra::create(replaySpr, this, menu_selector(TelemetryPopup::onReplayMacro));
-    m_replayButton->setPosition({ 135.0f, 0.0f });
-    m_replayButton->setEnabled(hasSavedMacro);
+    m_replayButton->setPosition({ 55.0f, 0.0f });
     buttonMenu->addChild(m_replayButton);
+
+    auto exportSpr = ButtonSprite::create("Export", "goldFont.fnt", "GJ_button_04.png", 0.70f);
+    m_exportButton = CCMenuItemSpriteExtra::create(exportSpr, this, menu_selector(TelemetryPopup::onExportMacro));
+    m_exportButton->setPosition({ 165.0f, 0.0f });
+    buttonMenu->addChild(m_exportButton);
+
+    setButtonVisualState(m_startButton, true);
+    setButtonVisualState(m_stopButton, false);
+    setButtonVisualState(m_replayButton, hasSavedMacro);
+    setButtonVisualState(m_exportButton, hasSavedMacro);
 
     this->scheduleUpdate();
     return true;
@@ -233,9 +263,10 @@ void TelemetryPopup::update(float dt) {
 
     // Button states
     bool isSearching = SwarmSolver::get().isRunning();
-    m_startButton->setEnabled(!isSearching);
-    m_stopButton->setEnabled(isSearching);
-    m_replayButton->setEnabled(hasSavedMacro && !isSearching);
+    setButtonVisualState(m_startButton, !isSearching);
+    setButtonVisualState(m_stopButton, isSearching);
+    setButtonVisualState(m_replayButton, hasSavedMacro && !isSearching);
+    setButtonVisualState(m_exportButton, hasSavedMacro && !isSearching);
 }
 
 TelemetryPopup::~TelemetryPopup() {
@@ -354,18 +385,68 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         SwarmSolver::get().start(m_headlessPlayLayer);
     }
 
-    m_startButton->setEnabled(false);
-    m_stopButton->setEnabled(true);
     m_statusLabel->setString("Status: Swarm Searching");
     m_statusLabel->setColor({ 0, 255, 128 });
+    setButtonVisualState(m_startButton, false);
+    setButtonVisualState(m_stopButton, true);
+    setButtonVisualState(m_replayButton, false);
+    setButtonVisualState(m_exportButton, false);
 }
 
 void TelemetryPopup::onStopSolver(cocos2d::CCObject* sender) {
     SwarmSolver::get().stop();
-    m_startButton->setEnabled(true);
-    m_stopButton->setEnabled(false);
     m_statusLabel->setString("Status: Stopped by user");
     m_statusLabel->setColor({ 255, 200, 0 });
+
+    int levelID = m_level ? m_level->m_levelID.value() : 0;
+    std::string levelName = m_level ? m_level->m_levelName : "";
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
+    setButtonVisualState(m_startButton, true);
+    setButtonVisualState(m_stopButton, false);
+    setButtonVisualState(m_replayButton, hasSavedMacro);
+    setButtonVisualState(m_exportButton, hasSavedMacro);
+}
+
+void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
+    if (!m_level) return;
+    int levelID = m_level->m_levelID.value();
+    std::string levelName = m_level->m_levelName;
+
+    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
+        FLAlertLayer::create("No Macro", "No solved macro found for this level to export.", "OK")->show();
+        return;
+    }
+
+    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
+        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+        MacroManager::get().saveMacro(levelID, levelName);
+    } else {
+        MacroManager::get().loadMacro(levelID, levelName);
+    }
+
+    const auto& actions = MacroManager::get().getActions();
+    if (actions.empty()) {
+        FLAlertLayer::create("No Actions", "Macro contains no recorded actions to export.", "OK")->show();
+        return;
+    }
+
+    auto exportRes = GDRExporter::exportReplays(levelName, levelID, actions);
+    std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
+
+    if (exportRes.success) {
+        std::string alertMsg = fmt::format(
+            "Macro exported to Mega Hack!\n\n"
+            "File: replays/{}-macro.gdr2\n"
+            "(also replays/{}-macro.json)\n\n"
+            "To play via Mega Hack:\n"
+            "Press Tab -> Replay -> select macro -> Load\n\n"
+            "Replay is also saved for built-in playback!",
+            safeName, safeName
+        );
+        FLAlertLayer::create("Macro Exported", alertMsg.c_str(), "OK")->show();
+    } else {
+        FLAlertLayer::create("Export Failed", "Failed to export macro files to replays directory.", "OK")->show();
+    }
 }
 
 void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
@@ -378,22 +459,12 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         return;
     }
 
-    MacroManager::get().loadMacro(levelID, levelName);
-
-    // Export latest macro to Mega Hack replays directory (.gdr2 and .json)
-    auto exportRes = GDRExporter::exportReplays(levelName, levelID, MacroManager::get().getActions());
-    std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
-
-    std::string alertMsg = fmt::format(
-        "Macro exported to Mega Hack!\n\n"
-        "File: replays/{}-macro.gdr2\n"
-        "(also replays/{}-macro.json)\n\n"
-        "To play via Mega Hack:\n"
-        "Press Tab -> Replay -> select macro -> Load\n\n"
-        "In-game playback is also armed!",
-        safeName, safeName
-    );
-    FLAlertLayer::create("Macro Exported", alertMsg.c_str(), "OK")->show();
+    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
+        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+        MacroManager::get().saveMacro(levelID, levelName);
+    } else {
+        MacroManager::get().loadMacro(levelID, levelName);
+    }
 
     // If currently inside an active scene PlayLayer (e.g. from PauseLayer)
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {

@@ -65,6 +65,7 @@ private:
     // Beam Checkpoint Tree Stack
     std::vector<BeamCheckpoint> m_checkpointStack;
     std::vector<TickAction> m_resolvedMacro;
+    std::vector<SwarmBot> m_partialProgressSeeds;
 
     // Active wave state
     uint32_t m_activeWaveIndex = 0;

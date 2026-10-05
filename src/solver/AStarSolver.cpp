@@ -54,6 +54,7 @@ void AStarSolver::start(PlayLayer* playLayer) {
         m_milestoneCheckpoint->retain();
     }
 
+    playLayer->m_hasCompletedLevel = false;
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
@@ -299,13 +300,10 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_extraDelta = 0.0;
             playLayer->m_isPaused = false;
 
-            // Apply candidate action via engine handleButton and PlayerObject button state
-            if (act == ActionType::Jump) {
-                playLayer->handleButton(true, 1, true);
-                playLayer->m_player1->pushButton(PlayerButton::Jump);
-            } else {
-                playLayer->handleButton(false, 1, true);
-                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            // Apply candidate action via engine handleButton on edge change
+            bool shouldHold = (act == ActionType::Jump);
+            if (shouldHold != current.snapshot.isHolding) {
+                playLayer->handleButton(shouldHold, 1, true);
             }
 
             // Headless fixed-step physics advance
@@ -328,7 +326,6 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                     );
                 }
                 playLayer->handleButton(false, 1, true);
-                playLayer->m_player1->releaseButton(PlayerButton::Jump);
                 playLayer->m_playerDied = false;
                 playLayer->m_player1->m_isDead = false;
                 continue;

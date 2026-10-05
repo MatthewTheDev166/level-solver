@@ -1,5 +1,6 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/modify/FMODAudioEngine.hpp>
 #include "../core/DeterministicPRNG.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
@@ -10,6 +11,17 @@
 #include "../ui/TelemetryPopup.hpp"
 
 using namespace geode::prelude;
+
+class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
+    void processCommands(float dt, bool isHalfTick, bool isLastTick) {
+        GJBaseGameLayer::processCommands(dt, isHalfTick, isLastTick);
+        if (!isHalfTick && solver::MacroManager::get().isReplaying()) {
+            if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
+                solver::MacroManager::get().stepReplaySubstep(pl);
+            }
+        }
+    }
+};
 
 class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
     void playMusic(gd::string path, bool p1, float p2, int p3) {
@@ -58,11 +70,6 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void update(float dt) {
-        // If macro replay is active, dispatch recorded inputs synchronized to delta time
-        if (solver::MacroManager::get().isReplaying()) {
-            solver::MacroManager::get().updateReplay(this, dt);
-        }
-
         PlayLayer::update(dt);
     }
 
@@ -70,6 +77,10 @@ class $modify(SolverPlayLayer, PlayLayer) {
         if (solver::HeadlessEngine::get().isHeadless()) {
             // RobTop's initial spawn anti-cheat spike (m_anticheatSpike / Object ID 8 at X <= 30.0) must not kill headless simulation
             if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
+                return;
+            }
+            // Suppress spurious camera/boundary deaths while player is on valid spawn floor
+            if (!object && player && player->getPositionX() <= 50.0f && player->getPositionY() >= 104.0f && !player->m_isUpsideDown) {
                 return;
             }
             static uint32_t s_deathLogCount = 0;

@@ -84,10 +84,16 @@ void SwarmSolver::start(PlayLayer* playLayer) {
         playLayer->m_anticheatSpike->setPosition({-9999.0f, -9999.0f});
     }
 
+    playLayer->m_hasCompletedLevel = false;
+
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
     playLayer->updateVisibility(0.0f);
 
     BeamCheckpoint root;
+    root.nativeCheckpoint = playLayer->createCheckpoint();
+    if (root.nativeCheckpoint) {
+        root.nativeCheckpoint->retain();
+    }
     root.snapshot.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
     root.startTick = 0;
     root.startX = m_startX;
@@ -96,7 +102,7 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     root.runnerUpIndex = 0;
     root.failedWaves = 0;
 
-    m_checkpointStack.push_back(root);
+    m_checkpointStack.push_back(std::move(root));
 
     m_telemetry.status = SolverStatus::Searching;
     m_telemetry.detailMessage = "Genetic Swarm active...";
@@ -140,6 +146,7 @@ void SwarmSolver::reset() {
     m_isRunning = false;
     m_isCompleted = false;
     m_checkpointStack.clear();
+    m_partialProgressSeeds.clear();
     m_resolvedMacro.clear();
     m_activeWaveIndex = 0;
     m_waveRetryCount = 0;
@@ -328,33 +335,29 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     } else {
         // Discrete mode (Cube, Ball, Robot, Spider):
         // Systematic Full-Horizon Grid Coverage.
-        // We step jump start ticks across the ENTIRE horizon [0, horizonTicks - 4] with step 4.
-        uint32_t phase = (waveRetryCount + m_backtrackCount * 3) % 4;
+        // We step jump start ticks across the ENTIRE horizon [0, horizonTicks - 4] with adaptive headroom to avoid starvation
+        uint32_t phase = (waveRetryCount * 3 + m_backtrackCount * 5) % 4;
 
-        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks; jumpAt += 4) {
+        for (uint32_t jumpAt = phase; jumpAt + 4 < horizonTicks && population.size() < m_currentPopulationSize - 25; jumpAt += 4) {
             // Short tap (6 ticks): micro-hops, orbs, pink pads, mini-cube
             addBotWithActions({ { jumpAt, true }, { jumpAt + 6, false } });
 
             // Standard jump (18 ticks): single and double spikes
             if (jumpAt + 18 < horizonTicks) {
                 addBotWithActions({ { jumpAt, true }, { jumpAt + 18, false } });
-            } else {
-                addBotWithActions({ { jumpAt, true } });
             }
 
-            // Full / triple spike hold (38 ticks)
-            if (jumpAt + 38 < horizonTicks) {
-                addBotWithActions({ { jumpAt, true }, { jumpAt + 38, false } });
-            } else {
-                addBotWithActions({ { jumpAt, true } });
+            // Full / triple spike hold (34 ticks)
+            if (jumpAt + 34 < horizonTicks) {
+                addBotWithActions({ { jumpAt, true }, { jumpAt + 34, false } });
             }
 
-            // Hold across remainder of horizon (useful for Robot or long jumps)
+            // Long hold across remainder of horizon
             addBotWithActions({ { jumpAt, true } });
         }
 
         // Multi-jump combinations across the horizon
-        for (uint32_t j1 = phase; j1 + 30 < horizonTicks; j1 += 12) {
+        for (uint32_t j1 = phase; j1 + 30 < horizonTicks && population.size() < m_currentPopulationSize - 10; j1 += 12) {
             uint32_t j2 = j1 + 22;
             addBotWithActions({
                 { j1, true },
@@ -398,8 +401,12 @@ void SwarmSolver::simulateBot(
     SwarmBot& bot,
     uint32_t horizonTicks
 ) {
-    // Restore parent checkpoint snapshot
-    checkpoint.snapshot.restore(playLayer->m_player1);
+    // Restore parent checkpoint using RobTop's full practice checkpoint when available
+    if (checkpoint.nativeCheckpoint) {
+        playLayer->loadFromCheckpoint(checkpoint.nativeCheckpoint);
+    } else {
+        checkpoint.snapshot.restore(playLayer->m_player1);
+    }
 
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
@@ -415,10 +422,12 @@ void SwarmSolver::simulateBot(
 
     size_t actionIdx = 0;
     bool currentButton = false;
+    bool lastButton = false;
     bool completed = false;
     float xNearEnd = checkpoint.startX;
 
     float prevX = playLayer->m_player1->getPositionX();
+    uint32_t jammedTicks = 0;
 
     for (uint32_t step = 0; step < horizonTicks; ++step) {
         // Track position near end of segment to detect wall jams
@@ -432,12 +441,10 @@ void SwarmSolver::simulateBot(
             actionIdx++;
         }
 
-        if (currentButton) {
-            playLayer->handleButton(true, 1, true);
-            playLayer->m_player1->pushButton(PlayerButton::Jump);
-        } else {
-            playLayer->handleButton(false, 1, true);
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        // Only dispatch button on state transition (edge-triggered, no 240Hz spam!)
+        if (currentButton != lastButton) {
+            playLayer->handleButton(currentButton, 1, true);
+            lastButton = currentButton;
         }
 
         // Step physics
@@ -461,24 +468,36 @@ void SwarmSolver::simulateBot(
             bot.survived = false;
             bot.finalX = playLayer->m_player1->getPositionX();
             bot.deathTick = checkpoint.startTick + step;
-            playLayer->handleButton(false, 1, true);
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            if (lastButton) {
+                playLayer->handleButton(false, 1, true);
+                lastButton = false;
+            }
             playLayer->m_playerDied = false;
             playLayer->m_player1->m_isDead = false;
             return;
         }
 
-        // Wall jam detection: if cube horizontal movement is stopped by a solid block
+        // Wall jam detection: accounts for 2.2 reverse mode (going left)
         float currentX = playLayer->m_player1->getPositionX();
-        if (step > 4 && currentX <= prevX + 0.001f) {
-            bot.survived = false;
-            bot.finalX = currentX;
-            bot.deathTick = checkpoint.startTick + step;
-            playLayer->handleButton(false, 1, true);
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
-            playLayer->m_playerDied = false;
-            playLayer->m_player1->m_isDead = false;
-            return;
+        bool isGoingLeft = playLayer->m_player1->m_isGoingLeft;
+        float deltaX = isGoingLeft ? (prevX - currentX) : (currentX - prevX);
+
+        if (step > 4 && deltaX < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider) {
+            jammedTicks++;
+            if (jammedTicks >= 4) {
+                bot.survived = false;
+                bot.finalX = currentX;
+                bot.deathTick = checkpoint.startTick + step;
+                if (lastButton) {
+                    playLayer->handleButton(false, 1, true);
+                    lastButton = false;
+                }
+                playLayer->m_playerDied = false;
+                playLayer->m_player1->m_isDead = false;
+                return;
+            }
+        } else {
+            jammedTicks = 0;
         }
         prevX = currentX;
     }
@@ -490,14 +509,15 @@ void SwarmSolver::simulateBot(
         bot.deathTick = checkpoint.startTick + horizonTicks;
     }
 
+    bool isGoingLeft = playLayer->m_player1->m_isGoingLeft;
     if (!completed) {
         bot.finalX = playLayer->m_player1->getPositionX();
         bot.deathTick = checkpoint.startTick + horizonTicks;
 
-        // A bot only survives if it made forward progress AND was not halted against a solid wall/obstacle
-        float netProgress = bot.finalX - checkpoint.startX;
-        float progressInLastTicks = bot.finalX - xNearEnd;
+        float netProgress = isGoingLeft ? (checkpoint.startX - bot.finalX) : (bot.finalX - checkpoint.startX);
+        float progressInLastTicks = isGoingLeft ? (xNearEnd - bot.finalX) : (bot.finalX - xNearEnd);
 
+        // A valid survivor must make net progress and must still be moving near the end
         if (netProgress > 25.0f && progressInLastTicks > 1.5f) {
             bot.survived = true;
         } else {
@@ -505,30 +525,33 @@ void SwarmSolver::simulateBot(
         }
     }
 
-    // Clearance score
+    // Clearance score: distance to nearest hazard
     size_t nearbyObs = 0;
     bot.clearance = HazardDetector::calculateClearance(playLayer->m_player1->getPosition(), playLayer->m_objects, nearbyObs);
 
     VehicleMode botMode = checkpoint.snapshot.mode;
     bool isContinuous = (botMode == VehicleMode::Ship || botMode == VehicleMode::Wave || botMode == VehicleMode::Swing || botMode == VehicleMode::UFO);
 
-    float fitness = bot.finalX + (0.05f * bot.clearance);
+    // Fitness score: distance made along level path
+    float progress = isGoingLeft ? (checkpoint.startX - bot.finalX) : (bot.finalX - checkpoint.startX);
+    float fitness = progress + (0.05f * bot.clearance);
     if (!isContinuous) {
-        // Grounded bonus: strongly favor states on the floor where player has full jump control
+        // Small ground bonus (5.0 instead of 50.0) so forward progress always dominates!
         if (playLayer->m_player1->m_isOnGround) {
-            fitness += 50.0f;
-        } else if (playLayer->m_player1->m_yVelocity < -1.0) {
-            // Penalize falling mid-air states
-            fitness -= 20.0f;
+            fitness += 5.0f;
+        } else if (playLayer->m_player1->m_yVelocity < -8.0) {
+            fitness -= 5.0f;
         }
-        // Simplicity bonus: reward minimal inputs when on safe terrain
-        fitness += (5.0f / (1.0f + static_cast<float>(bot.segmentActions.size())));
+        // Simplicity bonus: reward minimal inputs when safe
+        fitness += (2.0f / (1.0f + static_cast<float>(bot.segmentActions.size())));
     }
     bot.fitnessScore = fitness;
 
-    // Release button at end of simulation
-    playLayer->handleButton(false, 1, true);
-    playLayer->m_player1->releaseButton(PlayerButton::Jump);
+    // Release button at end of simulation if left pressed
+    if (lastButton) {
+        playLayer->handleButton(false, 1, true);
+        lastButton = false;
+    }
 }
 
 void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
@@ -551,6 +574,10 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
 
             BeamCheckpoint branchCp;
             simulateBot(playLayer, parentCp, const_cast<SwarmBot&>(altBot), altHorizon);
+            branchCp.nativeCheckpoint = playLayer->createCheckpoint();
+            if (branchCp.nativeCheckpoint) {
+                branchCp.nativeCheckpoint->retain();
+            }
             branchCp.snapshot.capture(playLayer->m_player1, parentCp.startTick + altHorizon);
             branchCp.startTick = parentCp.startTick + altHorizon;
             branchCp.startX = altBot.finalX;
@@ -611,7 +638,8 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     // Generate new population for wave if not currently evaluating one
     if (m_activePopulation.empty() || m_currentBotIndex >= m_activePopulation.size()) {
         m_activeWaveIndex++;
-        m_activePopulation = generatePopulation(mode, currentCp.startTick, horizonTicks, currentCp.runnerUps, currentCp.failedWaves);
+        const auto& seeds = (currentCp.failedWaves > 0 && !m_partialProgressSeeds.empty()) ? m_partialProgressSeeds : currentCp.runnerUps;
+        m_activePopulation = generatePopulation(mode, currentCp.startTick, horizonTicks, seeds, currentCp.failedWaves);
         m_currentBotIndex = 0;
         m_currentWaveSurvivors.clear();
         m_currentHorizonTicks = horizonTicks;
@@ -694,6 +722,10 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 return;
             }
 
+            nextCp.nativeCheckpoint = playLayer->createCheckpoint();
+            if (nextCp.nativeCheckpoint) {
+                nextCp.nativeCheckpoint->retain();
+            }
             nextCp.snapshot.capture(playLayer->m_player1, currentCp.startTick + m_currentHorizonTicks);
             nextCp.startTick = currentCp.startTick + m_currentHorizonTicks;
             nextCp.startX = bestBot.finalX;
@@ -710,6 +742,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             m_checkpointStack.push_back(std::move(nextCp));
             m_currentTick = m_checkpointStack.back().startTick;
+            m_partialProgressSeeds.clear();
 
             geode::log::info("[LevelSolver] Swarm advanced: Depth={}, X={:.1f} ({:.1f}%), Survivors={}/{}",
                 m_checkpointStack.size(), m_checkpointStack.back().startX,
@@ -727,11 +760,11 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             float waveMaxX = m_activePopulation.empty() ? 0.0f : m_activePopulation.front().finalX;
 
-            // Seed top furthest partial bots into runnerUps so generatePopulation breeds from them!
-            currentCp.runnerUps.clear();
-            for (size_t i = 0; i < m_activePopulation.size() && currentCp.runnerUps.size() < 4; ++i) {
+            // Seed top furthest partial bots into m_partialProgressSeeds (do NOT overwrite runnerUps!)
+            m_partialProgressSeeds.clear();
+            for (size_t i = 0; i < m_activePopulation.size() && m_partialProgressSeeds.size() < 4; ++i) {
                 if (m_activePopulation[i].finalX > currentCp.startX + 10.0f) {
-                    currentCp.runnerUps.push_back(m_activePopulation[i]);
+                    m_partialProgressSeeds.push_back(m_activePopulation[i]);
                 }
             }
 

@@ -27,6 +27,7 @@ public:
     void startReplay(PlayLayer* playLayer);
     void stopReplay(PlayLayer* playLayer);
     void updateReplay(PlayLayer* playLayer, float dt);
+    void stepReplaySubstep(PlayLayer* playLayer);
     bool isReplaying() const;
 
     uint32_t getCurrentPlaybackTick() const;

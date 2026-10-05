@@ -2,6 +2,7 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/PlayerObject.hpp>
+#include <Geode/binding/CheckpointObject.hpp>
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -199,13 +200,63 @@ struct SwarmBot {
 };
 
 struct BeamCheckpoint {
-    PlayerSnapshot snapshot;              // Native physics snapshot at segment start
-    uint32_t startTick = 0;               // Starting tick of this checkpoint
-    float startX = 0.0f;                  // X coordinate at segment start
-    std::vector<TickAction> macroHistory; // Global inputs accumulated to this point
-    std::vector<SwarmBot> runnerUps;      // Top alternate surviving paths
-    uint32_t runnerUpIndex = 0;           // Currently tested alternate branch
-    uint32_t failedWaves = 0;             // Consecutive failed generations
+    CheckpointObject* nativeCheckpoint = nullptr; // RobTop's full practice mode checkpoint
+    PlayerSnapshot snapshot;                      // Native physics snapshot at segment start
+    uint32_t startTick = 0;                       // Starting tick of this checkpoint
+    float startX = 0.0f;                          // X coordinate at segment start
+    std::vector<TickAction> macroHistory;         // Global inputs accumulated to this point
+    std::vector<SwarmBot> runnerUps;              // Top alternate surviving paths
+    uint32_t runnerUpIndex = 0;                   // Currently tested alternate branch
+    uint32_t failedWaves = 0;                     // Consecutive failed generations
+
+    BeamCheckpoint() = default;
+
+    ~BeamCheckpoint() {
+        if (nativeCheckpoint) {
+            nativeCheckpoint->release();
+            nativeCheckpoint = nullptr;
+        }
+    }
+
+    BeamCheckpoint(const BeamCheckpoint& other) {
+        *this = other;
+    }
+
+    BeamCheckpoint& operator=(const BeamCheckpoint& other) {
+        if (this != &other) {
+            if (nativeCheckpoint) nativeCheckpoint->release();
+            nativeCheckpoint = other.nativeCheckpoint;
+            if (nativeCheckpoint) nativeCheckpoint->retain();
+            snapshot = other.snapshot;
+            startTick = other.startTick;
+            startX = other.startX;
+            macroHistory = other.macroHistory;
+            runnerUps = other.runnerUps;
+            runnerUpIndex = other.runnerUpIndex;
+            failedWaves = other.failedWaves;
+        }
+        return *this;
+    }
+
+    BeamCheckpoint(BeamCheckpoint&& other) noexcept {
+        *this = std::move(other);
+    }
+
+    BeamCheckpoint& operator=(BeamCheckpoint&& other) noexcept {
+        if (this != &other) {
+            if (nativeCheckpoint) nativeCheckpoint->release();
+            nativeCheckpoint = other.nativeCheckpoint;
+            other.nativeCheckpoint = nullptr;
+            snapshot = other.snapshot;
+            startTick = other.startTick;
+            startX = other.startX;
+            macroHistory = std::move(other.macroHistory);
+            runnerUps = std::move(other.runnerUps);
+            runnerUpIndex = other.runnerUpIndex;
+            failedWaves = other.failedWaves;
+        }
+        return *this;
+    }
 };
 
 } // namespace solver

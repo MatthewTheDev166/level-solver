@@ -83,7 +83,7 @@ ExportResult GDRExporter::exportReplays(
         gdr::Replay replay("LevelSolver", 1);
         replay.author = "LevelSolver";
         replay.description = "Solved by LevelSolver Autonomous AI";
-        replay.gameVersion = 22074;
+        replay.gameVersion = 22081;
         replay.framerate = 240.0;
         replay.platformer = isPlatformer;
         replay.levelInfo = gdr::Level(levelName.empty() ? safeName : levelName, static_cast<uint32_t>(levelID));
@@ -119,7 +119,7 @@ ExportResult GDRExporter::exportReplays(
             if (act.tick > maxTick) maxTick = act.tick;
         }
         root["duration"] = static_cast<double>(maxTick) / 240.0;
-        root["gameVersion"] = 22074;
+        root["gameVersion"] = 22081;
         root["framerate"] = 240.0;
         root["seed"] = 1337;
         root["coins"] = 0;

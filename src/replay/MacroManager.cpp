@@ -159,6 +159,39 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     }
 }
 
+void MacroManager::stepReplaySubstep(PlayLayer* playLayer) {
+    if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
+
+    if (!playLayer->m_started || playLayer->m_player1->m_isDead) {
+        m_playbackTick = 0;
+        m_playbackIndex = 0;
+        if (m_lastButtonState) {
+            playLayer->handleButton(false, 1, true);
+            m_lastButtonState = false;
+        }
+        return;
+    }
+
+    while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
+        const auto& act = m_actions[m_playbackIndex];
+        if (act.pressed != m_lastButtonState) {
+            playLayer->handleButton(act.pressed, 1, true);
+            m_lastButtonState = act.pressed;
+        }
+        m_playbackIndex++;
+    }
+
+    m_playbackTick++;
+
+    if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
+        static bool s_loggedEnd = false;
+        if (!s_loggedEnd) {
+            s_loggedEnd = true;
+            geode::log::info("[LevelSolver] Macro replay completed all inputs");
+        }
+    }
+}
+
 void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
     if (!m_isReplaying || !playLayer || !playLayer->m_player1) return;
 
@@ -167,7 +200,10 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
         m_accumulatedTime = 0.0f;
         m_playbackTick = 0;
         m_playbackIndex = 0;
-        m_lastButtonState = false;
+        if (m_lastButtonState) {
+            playLayer->handleButton(false, 1, true);
+            m_lastButtonState = false;
+        }
         return;
     }
 
@@ -176,20 +212,11 @@ void MacroManager::updateReplay(PlayLayer* playLayer, float dt) {
 
     while (m_playbackIndex < m_actions.size() && m_actions[m_playbackIndex].tick <= m_playbackTick) {
         const auto& act = m_actions[m_playbackIndex];
-        if (act.pressed && !m_lastButtonState) {
-            playLayer->handleButton(true, 1, true);
-            playLayer->m_player1->pushButton(PlayerButton::Jump);
-            m_lastButtonState = true;
-        } else if (!act.pressed && m_lastButtonState) {
-            playLayer->handleButton(false, 1, true);
-            playLayer->m_player1->releaseButton(PlayerButton::Jump);
-            m_lastButtonState = false;
+        if (act.pressed != m_lastButtonState) {
+            playLayer->handleButton(act.pressed, 1, true);
+            m_lastButtonState = act.pressed;
         }
         m_playbackIndex++;
-    }
-
-    if (m_lastButtonState && playLayer->m_player1) {
-        playLayer->m_player1->pushButton(PlayerButton::Jump);
     }
 
     if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
