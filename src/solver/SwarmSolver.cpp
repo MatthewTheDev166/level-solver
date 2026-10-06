@@ -1144,10 +1144,10 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
 
         if (t % 60 == 0) {
             trajectory.push_back({ t, playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY() });
+            playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
         }
 
         playLayer->update(HeadlessEngine::FIXED_DT);
-        // Note: Do NOT call moveCameraToPos inside headless loop to prevent UI freeze!
 
         bool dead = playLayer->m_player1->m_isDead ||
                     (playLayer->m_player2 && playLayer->m_player2->m_isDead) ||
@@ -1204,6 +1204,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
             playLayer->m_player1->m_isDead = false;
             playLayer->m_hasCompletedLevel = false;
             playLayer->m_queuedButtons.clear();
+            activeCp.failedWaves++;
         }
         m_activePopulation.clear();
         return;

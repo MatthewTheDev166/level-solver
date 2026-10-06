@@ -183,14 +183,19 @@ class $modify(SolverPlayLayer, PlayLayer) {
             if (object && (object == this->m_anticheatSpike || (object->m_objectID == 8 && object->getPositionX() <= 30.0f))) {
                 return;
             }
-            // Suppress spurious camera/boundary deaths while player is on valid spawn floor
-            if (!object && player && player->getPositionX() <= 50.0f && player->getPositionY() >= 104.0f && !player->m_isUpsideDown) {
+            // In headless simulation, the camera is detached.
+            // Ignore camera culling / off-screen boundary deaths (object == nullptr) unless the player fell into the void.
+            if (!object) {
+                if (player && player->getPositionY() < -50.0f) {
+                    player->m_isDead = true;
+                    this->m_playerDied = true;
+                }
                 return;
             }
             static uint32_t s_deathLogCount = 0;
             if (++s_deathLogCount <= 50 || (s_deathLogCount % 200 == 0)) {
                 geode::log::warn("[LevelSolver] Simulation death: Object={}, Player=({:.1f}, {:.1f}), yVel={:.2f}",
-                    object ? fmt::format("ID {} ({}) at ({:.1f}, {:.1f})", object->m_objectID, static_cast<int>(object->m_objectType), object->getPositionX(), object->getPositionY()) : "NULL (Camera/Ground/Boundary)",
+                    fmt::format("ID {} ({}) at ({:.1f}, {:.1f})", object->m_objectID, static_cast<int>(object->m_objectType), object->getPositionX(), object->getPositionY()),
                     player ? player->getPositionX() : -1.0f,
                     player ? player->getPositionY() : -1.0f,
                     player ? player->m_yVelocity : 0.0
