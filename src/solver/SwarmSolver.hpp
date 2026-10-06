@@ -41,7 +41,8 @@ private:
         uint32_t waveRetryCount,
         float playerSpeed,
         float startX,
-        cocos2d::CCArray* levelObjects
+        cocos2d::CCArray* levelObjects,
+        bool startsHeld = false
     );
 
     // Rollout a single bot through the horizon
