@@ -68,7 +68,6 @@ void AStarSolver::start(PlayLayer* playLayer) {
     }
 
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-    playLayer->updateVisibility(0.0f);
 
     PlayerSnapshot initialSnap;
     initialSnap.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
@@ -312,9 +311,8 @@ void AStarSolver::stepSearchBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->update(HeadlessEngine::FIXED_DT);
             stepsDone++;
 
-            // Synchronize camera & quad-tree visibility to prevent out-of-bounds deaths
+            // Synchronize camera to prevent out-of-bounds deaths
             playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-            playLayer->updateVisibility(HeadlessEngine::FIXED_DT);
 
             // If player died, backtrack
             if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {

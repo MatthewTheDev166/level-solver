@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.5.0";
+    std::string verStr = "v1.5.1";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -420,7 +420,6 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
         }
         if (m_headlessPlayLayer->m_player1) {
             m_headlessPlayLayer->moveCameraToPos(m_headlessPlayLayer->m_player1->getPosition());
-            m_headlessPlayLayer->updateVisibility(0.0f);
         }
     }
 

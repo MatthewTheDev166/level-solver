@@ -1,5 +1,6 @@
 #include "MacroManager.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
+#include "../core/DeterministicPRNG.hpp"
 #include <Geode/binding/PlayerObject.hpp>
 #include <matjson.hpp>
 #include <fstream>
@@ -208,6 +209,7 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
     m_lastButtonState = false;
     m_state = ReplayState::Armed;
     m_replaySessionActive = true;
+    DeterministicPRNG::clampSeed();
 
     CheatAPIIntegrator::notifyCheatStarted();
     geode::log::info("[LevelSolver] Replay armed for level {} ('{}') with {} actions (total ticks: {})",
@@ -241,6 +243,7 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
         m_isDispatchingInput = false;
     }
 
+    DeterministicPRNG::clampSeed();
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
@@ -257,6 +260,7 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
 void MacroManager::onGameStart(PlayLayer* playLayer) {
     if (!m_replaySessionActive || m_actions.empty()) return;
 
+    DeterministicPRNG::clampSeed();
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_lastButtonState = false;
@@ -311,9 +315,22 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
 
     m_playbackTick++;
 
-    if (m_playbackIndex >= m_actions.size() && !m_lastButtonState) {
-        m_state = ReplayState::Finished;
-        geode::log::info("[LevelSolver] Macro replay completed all inputs at tick {}", m_playbackTick);
+    if (m_playbackIndex >= m_actions.size()) {
+        if (!m_lastButtonState || m_playbackTick > m_totalTicks + 60) {
+            if (m_lastButtonState) {
+                m_isDispatchingInput = true;
+                playLayer->handleButton(false, 1, true);
+                if (playLayer->m_player1) {
+                    playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                }
+                m_isDispatchingInput = false;
+                m_lastButtonState = false;
+            }
+            if (m_state != ReplayState::Finished) {
+                m_state = ReplayState::Finished;
+                geode::log::info("[LevelSolver] Macro replay completed all inputs at tick {}", m_playbackTick);
+            }
+        }
     }
 }
 

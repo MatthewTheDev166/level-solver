@@ -125,7 +125,6 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     }
 
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-    playLayer->updateVisibility(0.0f);
 
     BeamCheckpoint root;
     root.nativeCheckpoint = playLayer->createCheckpoint();
@@ -307,7 +306,8 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     }
 
     float spd = playerSpeed > 0.1f ? playerSpeed : 1.0f;
-    float unitsPerTick = 1.298f * spd;
+    float speedMult = (spd <= 1.0f && spd >= 0.85f) ? 1.0f : (spd / 0.9f);
+    float unitsPerTick = 1.298f * std::clamp(speedMult, 0.5f, 3.0f);
 
     // 3. Re-Run Targeted Mutations around Death Spot (when waveRetryCount > 0 and all bots died)
     // If all 160 bots died at around the same spot, specifically probe before the collision point
@@ -349,8 +349,8 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                         if (localDeath >= lead) {
                             uint32_t earlyT = localDeath - lead;
 
-                            // Test short, standard, full jumps, and holds from earlyT
-                            for (uint32_t dur : { 16u, 24u, 36u, 48u }) {
+                            // Test micro, short, standard, full jumps, and holds from earlyT
+                            for (uint32_t dur : { 4u, 8u, 16u, 24u, 36u, 48u }) {
                                 std::vector<TickAction> acts;
                                 acts.push_back({ earlyT, true });
                                 if (earlyT + dur < horizonTicks) {
@@ -425,7 +425,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 int takeoff = reachTick - lead;
                 if (takeoff >= 0 && takeoff < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(takeoff);
-                    for (uint32_t dur : { 16u, 24u, 36u, 48u }) {
+                    for (uint32_t dur : { 6u, 12u, 18u, 24u, 36u, 48u }) {
                         std::vector<TickAction> acts;
                         acts.push_back({ t, true });
                         if (t + dur < horizonTicks) {
@@ -452,16 +452,25 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 int tapTick = orbTick + offset;
                 if (tapTick >= 0 && tapTick < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(tapTick);
-                    std::vector<TickAction> acts;
-                    if (t > 4) {
-                        acts.push_back({ t - 4, false });
+                    if (isDash) {
+                        for (uint32_t dur : { 10u, 20u, 30u, 45u }) {
+                            std::vector<TickAction> acts;
+                            if (t > 4) acts.push_back({ t - 4, false });
+                            acts.push_back({ t, true });
+                            if (t + dur < horizonTicks) acts.push_back({ t + dur, false });
+                            addBotWithActions(acts);
+                        }
+                        std::vector<TickAction> dashHold;
+                        if (t > 4) dashHold.push_back({ t - 4, false });
+                        dashHold.push_back({ t, true });
+                        addBotWithActions(dashHold);
+                    } else {
+                        std::vector<TickAction> acts;
+                        if (t > 4) acts.push_back({ t - 4, false });
+                        acts.push_back({ t, true });
+                        if (t + 6 < horizonTicks) acts.push_back({ t + 6, false });
+                        addBotWithActions(acts);
                     }
-                    acts.push_back({ t, true });
-                    uint32_t dur = isDash ? 18 : 6;
-                    if (t + dur < horizonTicks) {
-                        acts.push_back({ t + dur, false });
-                    }
-                    addBotWithActions(acts);
                 }
             }
         }
@@ -541,6 +550,23 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     // 7. Strided Click Sweep (Cube, Robot, Ball, Spider)
     if (isJumpMode) {
         for (uint32_t t = 0; t < horizonTicks - 1; t += 3) {
+            // Micro hop for Robot mode (crucial for low ceiling spikes)
+            if (mode == VehicleMode::Robot) {
+                std::vector<TickAction> microJump;
+                microJump.push_back({ t, true });
+                if (t + 4 < horizonTicks) {
+                    microJump.push_back({ t + 4, false });
+                }
+                addBotWithActions(microJump);
+
+                std::vector<TickAction> miniJump;
+                miniJump.push_back({ t, true });
+                if (t + 8 < horizonTicks) {
+                    miniJump.push_back({ t + 8, false });
+                }
+                addBotWithActions(miniJump);
+            }
+
             // Short hop (16 ticks)
             std::vector<TickAction> shortJump;
             shortJump.push_back({ t, true });
@@ -615,6 +641,8 @@ void SwarmSolver::simulateBot(
     SwarmBot& bot,
     uint32_t horizonTicks
 ) {
+    DeterministicPRNG::clampSeed(checkpoint.snapshot.rngSeed);
+
     if (checkpoint.nativeCheckpoint) {
         playLayer->loadFromCheckpoint(checkpoint.nativeCheckpoint);
     }
@@ -867,6 +895,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (btn) playLayer->handleButton(true, 1, true);
             else playLayer->handleButton(false, 1, true);
 
+            DeterministicPRNG::clampSeed(currentCp.snapshot.rngSeed);
             bool advanceDied = false;
             for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
                 while (aIdx < bestBot.segmentActions.size() && bestBot.segmentActions[aIdx].tick <= s) {
@@ -907,17 +936,16 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             }
 
             // Capture new checkpoint state
-            nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+            nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::getCurrentSeed());
             bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
             nextCp.hasPlayer2 = isDual;
             if (isDual) {
-                nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+                nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::getCurrentSeed());
             }
             nextCp.startX = playLayer->m_player1->getPositionX();
 
             // Create native checkpoint ONCE for committed boundary
             playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-            playLayer->updateVisibility(0.0f);
             nextCp.nativeCheckpoint = playLayer->createCheckpoint();
             if (nextCp.nativeCheckpoint) {
                 nextCp.nativeCheckpoint->retain();
@@ -1032,6 +1060,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         if (btn) playLayer->handleButton(true, 1, true);
         else playLayer->handleButton(false, 1, true);
 
+        DeterministicPRNG::clampSeed(parentCp.snapshot.rngSeed);
         bool died = false;
         for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
             while (aIdx < altBot.segmentActions.size() && altBot.segmentActions[aIdx].tick <= s) {
@@ -1059,15 +1088,14 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         for (const auto& act : altBot.segmentActions) {
             nextCp.macroHistory.push_back({ parentCp.startTick + act.tick, act.pressed });
         }
-        nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+        nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::getCurrentSeed());
         bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
         nextCp.hasPlayer2 = isDual;
         if (isDual) {
-            nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+            nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::getCurrentSeed());
         }
         nextCp.startX = playLayer->m_player1->getPositionX();
         playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-        playLayer->updateVisibility(0.0f);
         nextCp.nativeCheckpoint = playLayer->createCheckpoint();
         if (nextCp.nativeCheckpoint) nextCp.nativeCheckpoint->retain();
         if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
@@ -1160,7 +1188,6 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     playLayer->m_queuedButtons.clear();
     playLayer->m_player1->releaseButton(PlayerButton::Jump);
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-    playLayer->updateVisibility(0.0f);
 
     std::vector<TrajectorySample> trajectory;
     size_t actIdx = 0;
@@ -1189,7 +1216,6 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         if (t % 30 == 0) {
             trajectory.push_back({ t, playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY() });
             playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
-            playLayer->updateVisibility(0.0f);
         }
 
         playLayer->update(HeadlessEngine::FIXED_DT);
