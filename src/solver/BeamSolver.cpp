@@ -165,6 +165,9 @@ void BeamSolver::start(PlayLayer* playLayer) {
     if (m_rootCheckpoint) {
         m_rootCheckpoint->retain();
     }
+    if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+        playLayer->m_checkpointArray->removeAllObjects();
+    }
     m_rootSnapshot.capture(playLayer->m_player1, 0, DeterministicPRNG::STATIC_SEED);
     bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
     m_hasPlayer2 = isDual;
@@ -362,9 +365,9 @@ void BeamSolver::triggerRewind(PlayLayer* playLayer) {
     bool sameStuck = (m_stuckX > 0.0f && std::abs(m_maxReachedX - m_stuckX) < 25.0f);
     m_stuckX = m_maxReachedX;
 
-    // Double search width up to 1536
-    if (m_currentWidth < 1536) {
-        m_currentWidth = std::min(m_currentWidth * 2, static_cast<size_t>(1536));
+    // Double search width up to 192
+    if (m_currentWidth < 192) {
+        m_currentWidth = std::min(m_currentWidth * 2, static_cast<size_t>(192));
     } else if (sameStuck || (m_rewindCount % 2 == 0)) {
         // At maximum width or repeatedly stuck near the same spot:
         // Pop the current layer to rewind progressively deeper!
@@ -542,6 +545,10 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     uint32_t simulatedTicks = 0;
 
     while (true) {
+        if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+            playLayer->m_checkpointArray->removeAllObjects();
+        }
+
         if (m_frontier.empty()) {
             triggerRewind(playLayer);
             if (!m_isRunning) return;
@@ -673,6 +680,9 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 if (child.checkpoint) {
                     child.checkpoint->retain();
                 }
+                if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+                    playLayer->m_checkpointArray->removeAllObjects();
+                }
 
                 // Register into arena
                 int32_t aidx = static_cast<int32_t>(m_arena.size());
@@ -744,31 +754,59 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             newFrontier.push_back(std::move(gn));
         }
 
-        size_t airSlots = (m_currentWidth > newFrontier.size()) ? (m_currentWidth - newFrontier.size()) : 1;
-        if (airNodes.size() <= airSlots) {
-            for (auto& an : airNodes) {
-                newFrontier.push_back(std::move(an));
-            }
-        } else {
-            std::sort(airNodes.begin(), airNodes.end(), [](const BeamNode& a, const BeamNode& b) {
-                return a.y < b.y;
-            });
-
-            size_t total = airNodes.size();
-            for (size_t b = 0; b < airSlots; ++b) {
-                size_t startIdx = (b * total) / airSlots;
-                size_t endIdx = ((b + 1) * total) / airSlots;
-                size_t bestIdx = startIdx;
-                float bestClearance = airNodes[startIdx].clearance;
-                for (size_t i = startIdx + 1; i < endIdx && i < total; ++i) {
-                    if (airNodes[i].clearance > bestClearance) {
-                        bestClearance = airNodes[i].clearance;
-                        bestIdx = i;
-                    }
-                }
-                newFrontier.push_back(std::move(airNodes[bestIdx]));
+        // Split airNodes by button state so orb-clicking agency (released) is never pruned by holding nodes
+        std::vector<BeamNode> airReleased;
+        std::vector<BeamNode> airHolding;
+        for (auto& an : airNodes) {
+            if (an.buttonDown) {
+                airHolding.push_back(std::move(an));
+            } else {
+                airReleased.push_back(std::move(an));
             }
         }
+
+        size_t airSlots = (m_currentWidth > newFrontier.size()) ? (m_currentWidth - newFrontier.size()) : 1;
+        size_t slotsRel = airSlots / 2;
+        size_t slotsHold = airSlots - slotsRel;
+
+        if (airReleased.size() < slotsRel) {
+            slotsHold += (slotsRel - airReleased.size());
+            slotsRel = airReleased.size();
+        } else if (airHolding.size() < slotsHold) {
+            slotsRel += (slotsHold - airHolding.size());
+            slotsHold = airHolding.size();
+        }
+
+        auto selectStratified = [&](std::vector<BeamNode>& group, size_t slots) {
+            if (group.empty() || slots == 0) return;
+            if (group.size() <= slots) {
+                for (auto& n : group) {
+                    newFrontier.push_back(std::move(n));
+                }
+            } else {
+                std::sort(group.begin(), group.end(), [](const BeamNode& a, const BeamNode& b) {
+                    return a.y < b.y;
+                });
+
+                size_t total = group.size();
+                for (size_t b = 0; b < slots; ++b) {
+                    size_t startIdx = (b * total) / slots;
+                    size_t endIdx = ((b + 1) * total) / slots;
+                    size_t bestIdx = startIdx;
+                    float bestClearance = group[startIdx].clearance;
+                    for (size_t i = startIdx + 1; i < endIdx && i < total; ++i) {
+                        if (group[i].clearance > bestClearance) {
+                            bestClearance = group[i].clearance;
+                            bestIdx = i;
+                        }
+                    }
+                    newFrontier.push_back(std::move(group[bestIdx]));
+                }
+            }
+        };
+
+        selectStratified(airReleased, slotsRel);
+        selectStratified(airHolding, slotsHold);
 
         m_frontier = std::move(newFrontier);
         m_currentTick = m_frontier.front().tick;
@@ -812,6 +850,9 @@ void BeamSolver::stepBeamBatch(PlayLayer* playLayer, uint32_t maxSteps) {
         if (now - startBatch >= timeBudget) {
             break;
         }
+    }
+    if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+        playLayer->m_checkpointArray->removeAllObjects();
     }
 
     auto endBatch = std::chrono::high_resolution_clock::now();
