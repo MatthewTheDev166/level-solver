@@ -45,6 +45,7 @@ void HeadlessEngine::setAudioSuppressed(bool suppressed) {
             FMOD::ChannelGroup* masterGroup = nullptr;
             if (engine->m_system->getMasterChannelGroup(&masterGroup) == FMOD_OK && masterGroup) {
                 masterGroup->setMute(suppressed);
+                masterGroup->setVolume(suppressed ? 0.0f : 1.0f);
             }
         }
     }

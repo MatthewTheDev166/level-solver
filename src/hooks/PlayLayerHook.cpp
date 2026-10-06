@@ -127,6 +127,13 @@ class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
         FMODAudioEngine::playMusic(path, p1, p2, p3);
     }
 
+    void playEffect(gd::string path) {
+        if (solver::HeadlessEngine::get().isAudioSuppressed()) {
+            return;
+        }
+        FMODAudioEngine::playEffect(path);
+    }
+
     void playEffect(gd::string path, float speed, float p2, float volume) {
         if (solver::HeadlessEngine::get().isAudioSuppressed()) {
             return;

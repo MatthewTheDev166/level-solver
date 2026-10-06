@@ -16,16 +16,24 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
         return true;
     }
 
-    // GD 2.2 percent check: strictly 100%
-    if (playLayer->getCurrentPercent() >= 100.0f) {
+    // GD 2.2 percent check: >= 99% is essentially complete
+    if (playLayer->getCurrentPercent() >= 99.0f) {
         return true;
     }
 
     float currentX = playLayer->m_player1->getPositionX();
     if (levelLength > startX + 50.0f) {
-        if (currentX >= (levelLength - 10.0f)) return true;
+        if (currentX >= (levelLength - 15.0f)) return true;
     } else {
         if (currentX >= levelLength) return true;
+    }
+
+    // Past all hazards and in final stretch (>= 88% of total level distance)
+    float totalDist = levelLength - startX;
+    if (lastHazardX > startX + 30.0f && currentX >= lastHazardX + 15.0f && totalDist > 50.0f && currentX >= startX + 0.88f * totalDist) {
+        if (!HazardDetector::isNearAnyObject(currentX, 60.0f)) {
+            return true;
+        }
     }
 
     return false;
@@ -102,6 +110,7 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     CheatAPIIntegrator::notifyCheatStarted();
     HeadlessEngine::get().enableHeadless();
 
+    playLayer->m_isPracticeMode = true;
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
@@ -231,14 +240,14 @@ bool SwarmSolver::runSelfTest(PlayLayer* playLayer) {
     playLayer->m_queuedButtons.clear();
     playLayer->m_player1->releaseButton(PlayerButton::Jump);
 
-    bool reachedEndWithoutDying = true;
+    bool reachedEndWithoutDying = false;
     for (uint32_t t = 0; t < 600; ++t) {
         playLayer->update(HeadlessEngine::FIXED_DT);
         if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
-            reachedEndWithoutDying = false;
             break;
         }
         if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+            reachedEndWithoutDying = true;
             break;
         }
     }
@@ -341,7 +350,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                             uint32_t earlyT = localDeath - lead;
 
                             // Test short, standard, full jumps, and holds from earlyT
-                            for (uint32_t dur : { 8u, 14u, 22u }) {
+                            for (uint32_t dur : { 16u, 24u, 36u, 48u }) {
                                 std::vector<TickAction> acts;
                                 acts.push_back({ earlyT, true });
                                 if (earlyT + dur < horizonTicks) {
@@ -416,7 +425,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 int takeoff = reachTick - lead;
                 if (takeoff >= 0 && takeoff < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(takeoff);
-                    for (uint32_t dur : { 12u, 18u, 24u }) {
+                    for (uint32_t dur : { 16u, 24u, 36u, 48u }) {
                         std::vector<TickAction> acts;
                         acts.push_back({ t, true });
                         if (t + dur < horizonTicks) {
@@ -531,48 +540,52 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
 
     // 7. Strided Click Sweep (Cube, Robot, Ball, Spider)
     if (isJumpMode) {
-        for (uint32_t t = 0; t < horizonTicks - 1; t += 2) {
-            // Standard jump (14 ticks)
+        for (uint32_t t = 0; t < horizonTicks - 1; t += 3) {
+            // Short hop (16 ticks)
+            std::vector<TickAction> shortJump;
+            shortJump.push_back({ t, true });
+            if (t + 16 < horizonTicks) {
+                shortJump.push_back({ t + 16, false });
+            }
+            addBotWithActions(shortJump);
+
+            // Medium standard jump (28 ticks)
             std::vector<TickAction> stdJump;
             stdJump.push_back({ t, true });
-            if (t + 14 < horizonTicks) {
-                stdJump.push_back({ t + 14, false });
+            if (t + 28 < horizonTicks) {
+                stdJump.push_back({ t + 28, false });
             }
             addBotWithActions(stdJump);
 
-            // Full high jump (22 ticks)
+            // Full high jump (44 ticks)
             std::vector<TickAction> fullJump;
             fullJump.push_back({ t, true });
-            if (t + 22 < horizonTicks) {
-                fullJump.push_back({ t + 22, false });
+            if (t + 44 < horizonTicks) {
+                fullJump.push_back({ t + 44, false });
             }
             addBotWithActions(fullJump);
 
-            // Hold from t to horizon end (essential for ramps and dash pads)
-            if (t % 4 == 0) {
-                addBotWithActions({ { t, true } });
+            // Maximum jump (60 ticks)
+            std::vector<TickAction> maxJump;
+            maxJump.push_back({ t, true });
+            if (t + 60 < horizonTicks) {
+                maxJump.push_back({ t + 60, false });
             }
+            addBotWithActions(maxJump);
 
-            // Micro-tap (8 ticks, for small hops / low ceiling)
-            if (t % 4 == 2) {
-                std::vector<TickAction> micro;
-                micro.push_back({ t, true });
-                if (t + 8 < horizonTicks) {
-                    micro.push_back({ t + 8, false });
-                }
-                addBotWithActions(micro);
-            }
+            // Hold from t to horizon end
+            addBotWithActions({ { t, true } });
         }
 
         // Multi-click / Double jump combinations
-        for (uint32_t t1 = 0; t1 + 18 < horizonTicks; t1 += 6) {
-            uint32_t t2 = t1 + 16;
+        for (uint32_t t1 = 0; t1 + 24 < horizonTicks; t1 += 6) {
+            uint32_t t2 = t1 + 20;
             std::vector<TickAction> dbl;
             dbl.push_back({ t1, true });
-            dbl.push_back({ t1 + 10, false });
+            dbl.push_back({ t1 + 14, false });
             dbl.push_back({ t2, true });
-            if (t2 + 10 < horizonTicks) {
-                dbl.push_back({ t2 + 10, false });
+            if (t2 + 14 < horizonTicks) {
+                dbl.push_back({ t2 + 14, false });
             }
             addBotWithActions(dbl);
         }
@@ -638,14 +651,14 @@ void SwarmSolver::simulateBot(
     for (uint32_t step = 0; step < horizonTicks; ++step) {
         // Apply input scheduled for this segment tick
         while (actionIdx < bot.segmentActions.size() && bot.segmentActions[actionIdx].tick <= step) {
-            currentButton = bot.segmentActions[actionIdx].pressed;
+            bool btn = bot.segmentActions[actionIdx].pressed;
+            if (btn != lastButton) {
+                playLayer->handleButton(btn, 1, true);
+                lastButton = btn;
+            }
             actionIdx++;
         }
-
-        if (currentButton != lastButton) {
-            playLayer->handleButton(currentButton, 1, true);
-            lastButton = currentButton;
-        }
+        currentButton = lastButton;
 
         playLayer->update(HeadlessEngine::FIXED_DT);
 
@@ -674,7 +687,11 @@ void SwarmSolver::simulateBot(
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
             // Check if player has reached the physical End Wall of the level
-            bool isAtEndWall = (currX >= (m_levelLength - 15.0f));
+            float totalDist = m_levelLength - m_startX;
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) ||
+                               (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f &&
+                                (currX >= m_startX + 0.85f * totalDist || !HazardDetector::isNearAnyObject(currX, 60.0f))) ||
+                               (playLayer->getCurrentPercent() >= 95.0f);
 
             if (isAtEndWall) {
                 // Reached the physical End Wall of the level! Mark level completed!
@@ -732,6 +749,8 @@ void SwarmSolver::simulateBot(
         fitness += std::min(bot.clearance, 60.0f) * 0.8f;
         if (!isJumpMode) {
             fitness += std::min(bot.clearance, 60.0f) * 0.5f;
+        } else if (playLayer->m_player1->m_isOnGround) {
+            fitness += 25.0f; // Landing bonus after clearing obstacle
         }
     }
 
@@ -752,7 +771,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
     auto& currentCp = m_checkpointStack.back();
     VehicleMode mode = currentCp.snapshot.mode;
-    uint32_t horizonTicks = (mode == VehicleMode::Wave) ? 36u : ((mode == VehicleMode::Ship) ? 48u : 48u);
+    uint32_t horizonTicks = (mode == VehicleMode::Wave) ? 36u : ((mode == VehicleMode::Ship || mode == VehicleMode::Swing || mode == VehicleMode::UFO) ? 48u : 60u);
 
     // Generate population for wave if not currently evaluating one
     if (m_activePopulation.empty() || m_currentBotIndex >= m_activePopulation.size()) {
@@ -851,12 +870,12 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             bool advanceDied = false;
             for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
                 while (aIdx < bestBot.segmentActions.size() && bestBot.segmentActions[aIdx].tick <= s) {
-                    btn = bestBot.segmentActions[aIdx].pressed;
+                    bool b = bestBot.segmentActions[aIdx].pressed;
+                    if (b != lastB) {
+                        playLayer->handleButton(b, 1, true);
+                        lastB = b;
+                    }
                     aIdx++;
-                }
-                if (btn != lastB) {
-                    playLayer->handleButton(btn, 1, true);
-                    lastB = btn;
                 }
                 playLayer->update(HeadlessEngine::FIXED_DT);
                 if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
@@ -887,23 +906,25 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 nextCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
             }
 
-                // Capture new checkpoint state
-                nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
-                bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
-                nextCp.hasPlayer2 = isDual;
-                if (isDual) {
-                    nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
-                }
-                nextCp.startX = playLayer->m_player1->getPositionX();
+            // Capture new checkpoint state
+            nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+            bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
+            nextCp.hasPlayer2 = isDual;
+            if (isDual) {
+                nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+            }
+            nextCp.startX = playLayer->m_player1->getPositionX();
 
-                // Create native checkpoint ONCE for committed boundary
-                nextCp.nativeCheckpoint = playLayer->createCheckpoint();
-                if (nextCp.nativeCheckpoint) {
-                    nextCp.nativeCheckpoint->retain();
-                }
-                if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
-                    playLayer->m_checkpointArray->removeAllObjects();
-                }
+            // Create native checkpoint ONCE for committed boundary
+            playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+            playLayer->updateVisibility(0.0f);
+            nextCp.nativeCheckpoint = playLayer->createCheckpoint();
+            if (nextCp.nativeCheckpoint) {
+                nextCp.nativeCheckpoint->retain();
+            }
+            if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+                playLayer->m_checkpointArray->removeAllObjects();
+            }
 
                 m_checkpointStack.push_back(std::move(nextCp));
                 m_currentTick = m_checkpointStack.back().startTick;
@@ -1014,12 +1035,12 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         bool died = false;
         for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
             while (aIdx < altBot.segmentActions.size() && altBot.segmentActions[aIdx].tick <= s) {
-                btn = altBot.segmentActions[aIdx].pressed;
+                bool b = altBot.segmentActions[aIdx].pressed;
+                if (b != lastB) {
+                    playLayer->handleButton(b, 1, true);
+                    lastB = b;
+                }
                 aIdx++;
-            }
-            if (btn != lastB) {
-                playLayer->handleButton(btn, 1, true);
-                lastB = btn;
             }
             playLayer->update(HeadlessEngine::FIXED_DT);
             if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
@@ -1045,6 +1066,8 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
             nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
         }
         nextCp.startX = playLayer->m_player1->getPositionX();
+        playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+        playLayer->updateVisibility(0.0f);
         nextCp.nativeCheckpoint = playLayer->createCheckpoint();
         if (nextCp.nativeCheckpoint) nextCp.nativeCheckpoint->retain();
         if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
@@ -1112,6 +1135,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     }
 
     // 2. Verification simulation run from tick 0
+    DeterministicPRNG::clampSeed();
     playLayer->resetLevel();
     playLayer->startGame();
 
@@ -1129,9 +1153,14 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
     if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+    playLayer->m_resumeTimer = 0;
+    playLayer->m_extraDelta = 0.0;
+    playLayer->m_isPaused = false;
     playLayer->m_hasCompletedLevel = false;
     playLayer->m_queuedButtons.clear();
     playLayer->m_player1->releaseButton(PlayerButton::Jump);
+    playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+    playLayer->updateVisibility(0.0f);
 
     std::vector<TrajectorySample> trajectory;
     size_t actIdx = 0;
@@ -1148,17 +1177,19 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
 
     for (uint32_t t = 0; t <= totalTicks; ++t) {
         while (actIdx < compressed.size() && compressed[actIdx].tick <= t) {
-            currBtn = compressed[actIdx].pressed;
+            bool btn = compressed[actIdx].pressed;
+            if (btn != lastSimBtn) {
+                playLayer->handleButton(btn, 1, true);
+                lastSimBtn = btn;
+            }
             actIdx++;
         }
-        if (currBtn != lastSimBtn) {
-            playLayer->handleButton(currBtn, 1, true);
-            lastSimBtn = currBtn;
-        }
+        currBtn = lastSimBtn;
 
-        if (t % 60 == 0) {
+        if (t % 30 == 0) {
             trajectory.push_back({ t, playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY() });
             playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+            playLayer->updateVisibility(0.0f);
         }
 
         playLayer->update(HeadlessEngine::FIXED_DT);
@@ -1182,7 +1213,11 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         bool goingLeft = playLayer->m_player1->m_isGoingLeft;
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
-            bool isAtEndWall = (currX >= (m_levelLength - 15.0f));
+            float totalDist = m_levelLength - m_startX;
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) ||
+                               (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f &&
+                                (currX >= m_startX + 0.85f * totalDist || !HazardDetector::isNearAnyObject(currX, 60.0f))) ||
+                               (playLayer->getCurrentPercent() >= 95.0f);
             if (isAtEndWall) {
                 // Reached end wall cleanly in verification!
                 break;

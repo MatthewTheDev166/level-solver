@@ -11,7 +11,7 @@ namespace solver {
 
 class HazardDetector {
 public:
-    static constexpr float EVALUATION_RADIUS_X = 250.0f;
+    static constexpr float EVALUATION_RADIUS_X = 100.0f;
     static constexpr float EVALUATION_RADIUS_Y = 150.0f;
     static constexpr float MAX_CLEARANCE = 100.0f;
     static constexpr float BUCKET_WIDTH = 200.0f;

@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.4.9";
+    std::string verStr = "v1.5.0";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -394,6 +394,7 @@ void TelemetryPopup::onStartSolver(cocos2d::CCObject* sender) {
     m_headlessPlayLayer->retain();
     m_headlessScene->addChild(m_headlessPlayLayer);
     m_headlessPlayLayer->m_isSilent = true;
+    m_headlessPlayLayer->m_isPracticeMode = true;
 
     // Disable all input reception on headless layer to avoid intercepting user keys/clicks
     m_headlessPlayLayer->setKeypadEnabled(false);
