@@ -15,14 +15,17 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
     if (playLayer->m_level && playLayer->m_level->isPlatformer()) {
         return playLayer->m_hasCompletedLevel;
     }
-    if (playLayer->m_hasCompletedLevel) return true;
 
     float currentX = playLayer->m_player1->getPositionX();
-    if (currentX >= levelLength) return true;
-    if (levelLength > startX + 50.0f && currentX >= (levelLength - 15.0f)) return true;
+    if (levelLength > startX + 50.0f) {
+        if (currentX >= (levelLength - 10.0f)) return true;
+    } else {
+        if (currentX >= levelLength) return true;
+    }
 
-    float percent = playLayer->getCurrentPercent();
-    if (percent >= 99.0f) return true;
+    if (playLayer->m_hasCompletedLevel && currentX >= (levelLength - 40.0f)) {
+        return true;
+    }
 
     return false;
 }
@@ -297,24 +300,25 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
             float distToHazard = nearestHazardX - startX;
             int reachTick = static_cast<int>(std::round(distToHazard / unitsPerTick));
 
-            // Sample physical jump takeoff window across every tick of the approach (16 to 38 units lead)
-            int minLead = static_cast<int>(std::round(16.0f / unitsPerTick));
-            int maxLead = static_cast<int>(std::round(38.0f / unitsPerTick));
+            // Sample physical jump takeoff window across every tick of the approach (14 to 44 units lead)
+            int minLead = static_cast<int>(std::round(14.0f / unitsPerTick));
+            int maxLead = static_cast<int>(std::round(44.0f / unitsPerTick));
 
             for (int lead = minLead; lead <= maxLead; lead += 1) {
                 int takeoff = reachTick - lead;
                 if (takeoff >= 0 && takeoff < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(takeoff);
-                    // Single jump tap (duration 12-14 ticks for cube)
-                    uint32_t dur = (mode == VehicleMode::Robot) ? 20 : 13;
-                    std::vector<TickAction> acts;
-                    acts.push_back({ t, true });
-                    if (t + dur < horizonTicks) {
-                        acts.push_back({ t + dur, false });
+                    // Test multiple jump hold durations: short tap, medium hold, and full triple-spike hold
+                    for (uint32_t dur : { 12u, 18u, 24u }) {
+                        std::vector<TickAction> acts;
+                        acts.push_back({ t, true });
+                        if (t + dur < horizonTicks) {
+                            acts.push_back({ t + dur, false });
+                        }
+                        addBotWithActions(acts);
                     }
-                    addBotWithActions(acts);
 
-                    // Sustained jump hold
+                    // Sustained jump hold (essential for high jump arcs and ramps)
                     std::vector<TickAction> holdActs;
                     holdActs.push_back({ t, true });
                     addBotWithActions(holdActs);
@@ -357,7 +361,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     bool isContinuous = (mode == VehicleMode::Ship || mode == VehicleMode::Wave || mode == VehicleMode::Swing || mode == VehicleMode::UFO);
     if (isContinuous) {
         // Multi-frequency micro-taps and varied duty cycles
-        for (uint32_t period : { 2u, 3u, 4u, 6u, 8u, 10u, 12u, 16u, 20u }) {
+        for (uint32_t period : { 1u, 2u, 3u, 4u, 5u, 6u, 8u, 10u, 12u, 16u }) {
             // Balanced square wave
             std::vector<TickAction> sq;
             bool st = true;
@@ -375,26 +379,53 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 st = !st;
             }
             addBotWithActions(sqInv);
+        }
 
-            // Upward bias (climb pattern)
+        // Asymmetric climb patterns (gentle and steep)
+        for (auto [onT, offT] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {2, 1}, {3, 2}, {4, 3}, {5, 4}, {3, 1}, {4, 2}, {5, 2}
+        }) {
             std::vector<TickAction> climb;
-            for (uint32_t t = 0; t < horizonTicks; t += (period * 2)) {
-                climb.push_back({ t, true });
-                if (t + period + 2 < horizonTicks) {
-                    climb.push_back({ t + period + 2, false });
+            uint32_t cur = 0;
+            while (cur < horizonTicks) {
+                climb.push_back({ cur, true });
+                cur += onT;
+                if (cur < horizonTicks) {
+                    climb.push_back({ cur, false });
+                    cur += offT;
                 }
             }
             addBotWithActions(climb);
+        }
 
-            // Downward bias (dive pattern)
+        // Asymmetric dive patterns (gentle and steep)
+        for (auto [offT, onT] : std::vector<std::pair<uint32_t, uint32_t>>{
+            {2, 1}, {3, 2}, {4, 3}, {5, 4}, {3, 1}, {4, 2}, {5, 2}
+        }) {
             std::vector<TickAction> dive;
-            for (uint32_t t = 0; t < horizonTicks; t += (period * 2)) {
-                dive.push_back({ t, false });
-                if (t + period - 1 < horizonTicks) {
-                    dive.push_back({ t + period - 1, true });
+            uint32_t cur = 0;
+            while (cur < horizonTicks) {
+                dive.push_back({ cur, false });
+                cur += offT;
+                if (cur < horizonTicks) {
+                    dive.push_back({ cur, true });
+                    cur += onT;
                 }
             }
             addBotWithActions(dive);
+        }
+
+        // Zigzag / slope transitions (climb for K ticks, dive for remainder, and vice-versa)
+        for (uint32_t k : { 6u, 10u, 14u, 18u, 22u, 26u, 30u }) {
+            if (k < horizonTicks) {
+                // Climb then dive
+                std::vector<TickAction> cd = { { 0, true }, { k, false } };
+                addBotWithActions(cd);
+
+                // Dive then climb
+                std::vector<TickAction> dc = { { 0, false }, { k, true } };
+                addBotWithActions(dc);
+            }
         }
     }
 
@@ -412,19 +443,39 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
             sIdx++;
 
             if (!parent.survived && parent.deathTick > startTick) {
-                // Shift takeoff earlier before the obstacle death point
                 uint32_t localDeath = parent.deathTick - startTick;
-                uint32_t shift = 4 + (rng() % 16);
-                uint32_t earlyT = (localDeath > shift) ? (localDeath - shift) : 0;
-                std::vector<TickAction> mutated = parent.segmentActions;
-                mutated.push_back({ earlyT, true });
-                if (earlyT + 12 < horizonTicks) {
-                    mutated.push_back({ earlyT + 12, false });
+
+                if (mode == VehicleMode::Wave) {
+                    // For Wave mode: toggle input 1-4 ticks before impact to pull away from wall
+                    for (uint32_t lead : { 1u, 2u, 3u, 4u }) {
+                        if (localDeath >= lead) {
+                            uint32_t flipT = localDeath - lead;
+                            std::vector<TickAction> flipped = parent.segmentActions;
+                            bool curState = false;
+                            for (const auto& a : flipped) {
+                                if (a.tick <= flipT) curState = a.pressed;
+                            }
+                            flipped.push_back({ flipT, !curState });
+                            std::sort(flipped.begin(), flipped.end(), [](const TickAction& a, const TickAction& b) {
+                                return a.tick < b.tick;
+                            });
+                            addBotWithActions(flipped);
+                        }
+                    }
+                } else {
+                    // Shift takeoff earlier before the obstacle death point
+                    uint32_t shift = 4 + (rng() % 16);
+                    uint32_t earlyT = (localDeath > shift) ? (localDeath - shift) : 0;
+                    std::vector<TickAction> mutated = parent.segmentActions;
+                    mutated.push_back({ earlyT, true });
+                    if (earlyT + 18 < horizonTicks) {
+                        mutated.push_back({ earlyT + 18, false });
+                    }
+                    std::sort(mutated.begin(), mutated.end(), [](const TickAction& a, const TickAction& b) {
+                        return a.tick < b.tick;
+                    });
+                    addBotWithActions(mutated);
                 }
-                std::sort(mutated.begin(), mutated.end(), [](const TickAction& a, const TickAction& b) {
-                    return a.tick < b.tick;
-                });
-                addBotWithActions(mutated);
             } else {
                 // Jitter click timings by +-1 to +-3 ticks
                 std::vector<TickAction> mutated = parent.segmentActions;
@@ -441,11 +492,12 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     // 8. Fill remaining slots with exploratory random intervals
     while (population.size() < m_currentPopulationSize) {
         std::vector<TickAction> rndActs;
-        uint32_t curT = rng() % 8;
+        uint32_t curT = rng() % 6;
         bool curSt = (rng() % 2 == 1);
+        uint32_t maxDur = (mode == VehicleMode::Wave) ? 8u : 24u;
         while (curT < horizonTicks) {
             rndActs.push_back({ curT, curSt });
-            uint32_t dur = 3 + (rng() % 24);
+            uint32_t dur = 2 + (rng() % maxDur);
             curT += dur;
             curSt = !curSt;
         }
@@ -598,7 +650,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
     auto& currentCp = m_checkpointStack.back();
     VehicleMode mode = currentCp.snapshot.mode;
-    uint32_t horizonTicks = (mode == VehicleMode::Wave || mode == VehicleMode::Ship) ? 60u : 48u;
+    uint32_t horizonTicks = (mode == VehicleMode::Wave) ? 36u : ((mode == VehicleMode::Ship) ? 48u : 48u);
 
     // Generate population for wave if not currently evaluating one
     if (m_activePopulation.empty() || m_currentBotIndex >= m_activePopulation.size()) {
@@ -663,15 +715,14 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 return a.fitnessScore > b.fitnessScore;
             });
 
-            const auto& bestBot = m_currentWaveSurvivors.front();
-
-            // Commit winning bot into a new BeamCheckpoint
-            BeamCheckpoint nextCp;
-            nextCp.startTick = currentCp.startTick + m_currentHorizonTicks;
-            nextCp.macroHistory = currentCp.macroHistory;
-            for (const auto& act : bestBot.segmentActions) {
-                nextCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
+            // Store alternate survivors as runner-ups in currentCp for backtracking
+            currentCp.runnerUps.clear();
+            for (size_t i = 1; i < m_currentWaveSurvivors.size() && currentCp.runnerUps.size() < 6; ++i) {
+                currentCp.runnerUps.push_back(m_currentWaveSurvivors[i]);
             }
+            currentCp.runnerUpIndex = 0;
+
+            const auto& bestBot = m_currentWaveSurvivors.front();
 
             // Advance simulation to the new checkpoint boundary using best bot
             currentCp.snapshot.restore(playLayer->m_player1);
@@ -682,6 +733,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_inResetDelay = false;
             playLayer->m_playerDied = false;
             playLayer->m_player1->m_isDead = false;
+            playLayer->m_hasCompletedLevel = false;
             playLayer->m_queuedButtons.clear();
 
             size_t aIdx = 0;
@@ -701,49 +753,80 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (lastB) playLayer->handleButton(false, 1, true);
             playLayer->m_queuedButtons.clear();
 
-            // Capture new checkpoint state
-            nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
-            bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
-            nextCp.hasPlayer2 = isDual;
-            if (isDual) {
-                nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
-            }
-            nextCp.startX = playLayer->m_player1->getPositionX();
-
-            // Create native checkpoint ONCE for committed boundary
-            nextCp.nativeCheckpoint = playLayer->createCheckpoint();
-            if (nextCp.nativeCheckpoint) {
-                nextCp.nativeCheckpoint->retain();
-            }
-            if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
-                playLayer->m_checkpointArray->removeAllObjects();
+            // Ground extension for jumping modes (prevents committing checkpoints in mid-air!)
+            bool isJumpingMode = (mode == VehicleMode::Cube || mode == VehicleMode::Robot || mode == VehicleMode::Ball || mode == VehicleMode::Spider);
+            uint32_t extraTicks = 0;
+            if (isJumpingMode && !playLayer->m_player1->m_isOnGround) {
+                while (!playLayer->m_player1->m_isOnGround && extraTicks < 40 && !playLayer->m_player1->m_isDead && !playLayer->m_playerDied) {
+                    playLayer->update(HeadlessEngine::FIXED_DT);
+                    extraTicks++;
+                }
             }
 
-            // Store alternate survivors as runner-ups for backtracking
-            for (size_t i = 1; i < m_currentWaveSurvivors.size() && i < 4; ++i) {
-                nextCp.runnerUps.push_back(m_currentWaveSurvivors[i]);
+            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                // Best bot crashed on landing! Retry wave with mutations
+                currentCp.failedWaves++;
+                m_activePopulation.clear();
+            } else {
+                // Commit winning bot into a new BeamCheckpoint
+                BeamCheckpoint nextCp;
+                nextCp.startTick = currentCp.startTick + m_currentHorizonTicks + extraTicks;
+                nextCp.macroHistory = currentCp.macroHistory;
+                for (const auto& act : bestBot.segmentActions) {
+                    nextCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
+                }
+
+                // Capture new checkpoint state
+                nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+                bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
+                nextCp.hasPlayer2 = isDual;
+                if (isDual) {
+                    nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+                }
+                nextCp.startX = playLayer->m_player1->getPositionX();
+
+                // Create native checkpoint ONCE for committed boundary
+                nextCp.nativeCheckpoint = playLayer->createCheckpoint();
+                if (nextCp.nativeCheckpoint) {
+                    nextCp.nativeCheckpoint->retain();
+                }
+                if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+                    playLayer->m_checkpointArray->removeAllObjects();
+                }
+
+                m_checkpointStack.push_back(std::move(nextCp));
+                m_currentTick = m_checkpointStack.back().startTick;
+                m_maxReachedX = m_checkpointStack.back().startX;
+                m_waveRetryCount = 0;
+                m_partialProgressSeeds.clear();
+                m_activePopulation.clear();
+
+                geode::log::info("[LevelSolver] Wave #{} passed (X={:.1f}, tick {}, {} survivors, best fitness={:.1f})",
+                    m_activeWaveIndex, m_maxReachedX, m_currentTick, m_lastSurvivorCount, bestBot.fitnessScore);
             }
-
-            m_checkpointStack.push_back(std::move(nextCp));
-            m_currentTick = m_checkpointStack.back().startTick;
-            m_maxReachedX = m_checkpointStack.back().startX;
-            m_waveRetryCount = 0;
-            m_partialProgressSeeds.clear();
-            m_activePopulation.clear();
-
-            geode::log::info("[LevelSolver] Wave #{} passed (X={:.1f}, tick {}, {} survivors, best fitness={:.1f})",
-                m_activeWaveIndex, m_maxReachedX, m_currentTick, m_lastSurvivorCount, bestBot.fitnessScore);
         } else {
-            // All 160 bots died! NEVER checkpoint a dead bot!
+            // All bots died!
             m_waveRetryCount++;
             currentCp.failedWaves++;
-            geode::log::warn("[LevelSolver] Wave #{} produced 0 survivors at X={:.1f} (failed {} times)",
-                m_activeWaveIndex, currentCp.startX, currentCp.failedWaves);
+
+            // Collect top furthest partial bots into m_partialProgressSeeds
+            std::sort(m_activePopulation.begin(), m_activePopulation.end(), [](const SwarmBot& a, const SwarmBot& b) {
+                return a.finalX > b.finalX;
+            });
+            m_partialProgressSeeds.clear();
+            for (size_t i = 0; i < m_activePopulation.size() && m_partialProgressSeeds.size() < 8; ++i) {
+                if (m_activePopulation[i].finalX > currentCp.startX + 5.0f) {
+                    m_partialProgressSeeds.push_back(m_activePopulation[i]);
+                }
+            }
+
+            geode::log::warn("[LevelSolver] Wave #{} produced 0 survivors at X={:.1f} (failed {} times, best reached X={:.1f})",
+                m_activeWaveIndex, currentCp.startX, currentCp.failedWaves,
+                m_activePopulation.empty() ? 0.0f : m_activePopulation.front().finalX);
 
             if (currentCp.failedWaves >= 3) {
                 handleBacktrack(playLayer);
             } else {
-                // Retry wave with wider mutations
                 m_activePopulation.clear();
             }
         }
@@ -769,21 +852,109 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
 void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     m_backtrackCount++;
-    geode::log::warn("[LevelSolver] Backtracking from X={:.1f} (backtrack #{})",
-        m_checkpointStack.back().startX, m_backtrackCount);
 
     if (m_checkpointStack.size() <= 1) {
-        // At root: reset failed waves and expand population exploration
+        // At root: reset failed waves and broaden exploration with fresh seeds
         m_checkpointStack.front().failedWaves = 0;
+        m_checkpointStack.front().runnerUpIndex = 0;
         m_activePopulation.clear();
         m_partialProgressSeeds.clear();
+        geode::log::warn("[LevelSolver] Backtracked to root checkpoint at X={:.1f} (backtrack #{})",
+            m_checkpointStack.front().startX, m_backtrackCount);
         return;
     }
 
-    // Pop the blocked checkpoint
+    geode::log::warn("[LevelSolver] Backtracking from X={:.1f} (backtrack #{})",
+        m_checkpointStack.back().startX, m_backtrackCount);
+
+    // Pop the failed checkpoint
     m_checkpointStack.pop_back();
 
     auto& parentCp = m_checkpointStack.back();
+
+    // Try alternate runner-up survivors from parent
+    while (parentCp.runnerUpIndex < parentCp.runnerUps.size()) {
+        const auto& altBot = parentCp.runnerUps[parentCp.runnerUpIndex++];
+
+        parentCp.snapshot.restore(playLayer->m_player1);
+        if (parentCp.hasPlayer2 && playLayer->m_player2) {
+            parentCp.snapshot2.restore(playLayer->m_player2);
+        }
+        playLayer->m_started = true;
+        playLayer->m_inResetDelay = false;
+        playLayer->m_playerDied = false;
+        playLayer->m_player1->m_isDead = false;
+        playLayer->m_hasCompletedLevel = false;
+        playLayer->m_queuedButtons.clear();
+
+        size_t aIdx = 0;
+        bool btn = false;
+        bool lastB = false;
+        bool died = false;
+        for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
+            while (aIdx < altBot.segmentActions.size() && altBot.segmentActions[aIdx].tick <= s) {
+                btn = altBot.segmentActions[aIdx].pressed;
+                aIdx++;
+            }
+            if (btn != lastB) {
+                playLayer->handleButton(btn, 1, true);
+                lastB = btn;
+            }
+            playLayer->update(HeadlessEngine::FIXED_DT);
+            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                died = true;
+                break;
+            }
+        }
+        if (lastB) playLayer->handleButton(false, 1, true);
+        playLayer->m_queuedButtons.clear();
+
+        if (died) continue;
+
+        VehicleMode mode = parentCp.snapshot.mode;
+        bool isJumpingMode = (mode == VehicleMode::Cube || mode == VehicleMode::Robot || mode == VehicleMode::Ball || mode == VehicleMode::Spider);
+        uint32_t extraTicks = 0;
+        if (isJumpingMode && !playLayer->m_player1->m_isOnGround) {
+            while (!playLayer->m_player1->m_isOnGround && extraTicks < 40 && !playLayer->m_player1->m_isDead && !playLayer->m_playerDied) {
+                playLayer->update(HeadlessEngine::FIXED_DT);
+                extraTicks++;
+            }
+            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) continue;
+        }
+
+        // Runner up survived and landed safely! Commit as nextCp
+        BeamCheckpoint nextCp;
+        nextCp.startTick = parentCp.startTick + m_currentHorizonTicks + extraTicks;
+        nextCp.macroHistory = parentCp.macroHistory;
+        for (const auto& act : altBot.segmentActions) {
+            nextCp.macroHistory.push_back({ parentCp.startTick + act.tick, act.pressed });
+        }
+        nextCp.snapshot.capture(playLayer->m_player1, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+        bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
+        nextCp.hasPlayer2 = isDual;
+        if (isDual) {
+            nextCp.snapshot2.capture(playLayer->m_player2, nextCp.startTick, DeterministicPRNG::STATIC_SEED);
+        }
+        nextCp.startX = playLayer->m_player1->getPositionX();
+        nextCp.nativeCheckpoint = playLayer->createCheckpoint();
+        if (nextCp.nativeCheckpoint) nextCp.nativeCheckpoint->retain();
+        if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+            playLayer->m_checkpointArray->removeAllObjects();
+        }
+
+        m_checkpointStack.push_back(std::move(nextCp));
+        m_currentTick = m_checkpointStack.back().startTick;
+        m_maxReachedX = m_checkpointStack.back().startX;
+        m_waveRetryCount = 0;
+        m_activePopulation.clear();
+        m_currentWaveSurvivors.clear();
+        m_currentBotIndex = 0;
+        geode::log::info("[LevelSolver] Switched to alternate survivor branch at X={:.1f} (runner-up #{})",
+            m_maxReachedX, parentCp.runnerUpIndex);
+        return;
+    }
+
+    // Runner-ups exhausted: restore parent and regenerate with different seed
     if (parentCp.nativeCheckpoint) {
         playLayer->loadFromCheckpoint(parentCp.nativeCheckpoint);
     }
@@ -791,11 +962,11 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     if (parentCp.hasPlayer2 && playLayer->m_player2) {
         parentCp.snapshot2.restore(playLayer->m_player2);
     }
-
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
+    playLayer->m_hasCompletedLevel = false;
     playLayer->m_queuedButtons.clear();
 
     m_currentTick = parentCp.startTick;
@@ -803,6 +974,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     m_activePopulation.clear();
     m_currentWaveSurvivors.clear();
     m_currentBotIndex = 0;
+    parentCp.failedWaves++;
 }
 
 void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions) {
@@ -825,7 +997,6 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     // Refuse 0-input macro if level has hazards
     if (HazardDetector::hasHazards() && compressed.empty()) {
         geode::log::error("[LevelSolver] Refusing 0-input macro on hazard level! Continuing search...");
-        handleBacktrack(playLayer);
         return;
     }
 
@@ -844,6 +1015,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
     if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+    playLayer->m_hasCompletedLevel = false;
     playLayer->m_queuedButtons.clear();
     playLayer->m_player1->releaseButton(PlayerButton::Jump);
 
@@ -875,7 +1047,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
                     (playLayer->m_player2 && playLayer->m_player2->m_isDead) ||
                     playLayer->m_playerDied;
         if (dead) {
-            geode::log::warn("[LevelSolver] Swarm verification failed at tick {} (died at X={:.1f})! Backtracking...",
+            geode::log::warn("[LevelSolver] Swarm verification failed at tick {} (died at X={:.1f})! Continuing search...",
                 t, playLayer->m_player1->getPositionX());
             verified = false;
             break;
@@ -890,7 +1062,23 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     playLayer->m_queuedButtons.clear();
 
     if (!verified) {
-        handleBacktrack(playLayer);
+        // Restore active checkpoint so search continues safely without breaking tree
+        if (!m_checkpointStack.empty()) {
+            auto& activeCp = m_checkpointStack.back();
+            if (activeCp.nativeCheckpoint) {
+                playLayer->loadFromCheckpoint(activeCp.nativeCheckpoint);
+            }
+            activeCp.snapshot.restore(playLayer->m_player1);
+            if (activeCp.hasPlayer2 && playLayer->m_player2) {
+                activeCp.snapshot2.restore(playLayer->m_player2);
+            }
+            playLayer->m_started = true;
+            playLayer->m_inResetDelay = false;
+            playLayer->m_playerDied = false;
+            playLayer->m_player1->m_isDead = false;
+            playLayer->m_hasCompletedLevel = false;
+            playLayer->m_queuedButtons.clear();
+        }
         return;
     }
 
