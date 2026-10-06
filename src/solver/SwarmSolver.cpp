@@ -866,7 +866,6 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
                 geode::log::info("[LevelSolver] Wave #{} passed (X={:.1f}, tick {}, {} survivors, best fitness={:.1f}) - New checkpoint set!",
                     m_activeWaveIndex, m_maxReachedX, m_currentTick, m_lastSurvivorCount, bestBot.fitnessScore);
-            }
         } else {
             // All bots died!
             m_waveRetryCount++;
