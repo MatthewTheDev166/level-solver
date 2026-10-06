@@ -1,4 +1,6 @@
 #include "HeadlessEngine.hpp"
+#include <Geode/Geode.hpp>
+#include <Geode/binding/FMODAudioEngine.hpp>
 
 namespace solver {
 
@@ -10,13 +12,13 @@ HeadlessEngine& HeadlessEngine::get() {
 void HeadlessEngine::enableHeadless() {
     m_isHeadless = true;
     m_suppressRendering = true;
-    m_suppressAudio = true;
+    setAudioSuppressed(true);
 }
 
 void HeadlessEngine::disableHeadless() {
     m_isHeadless = false;
     m_suppressRendering = false;
-    m_suppressAudio = false;
+    setAudioSuppressed(false);
     m_ticksPerSecond = 0.0f;
 }
 
@@ -38,6 +40,14 @@ void HeadlessEngine::setRenderingSuppressed(bool suppressed) {
 
 void HeadlessEngine::setAudioSuppressed(bool suppressed) {
     m_suppressAudio = suppressed;
+    if (auto engine = FMODAudioEngine::sharedEngine()) {
+        if (engine->m_system) {
+            FMOD::ChannelGroup* masterGroup = nullptr;
+            if (engine->m_system->getMasterChannelGroup(&masterGroup) == FMOD_OK && masterGroup) {
+                masterGroup->setMute(suppressed);
+            }
+        }
+    }
 }
 
 void HeadlessEngine::recordStepBatch(uint32_t stepCount, double elapsedSeconds) {

@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.4.8";
+    std::string verStr = "v1.4.9";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel

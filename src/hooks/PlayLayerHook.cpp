@@ -258,6 +258,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
         if (!solver::HeadlessEngine::get().isHeadless()) {
+            solver::DeterministicPRNG::clampSeed();
             solver::MacroManager::get().onLevelReset(this);
             updateReplayBadge(this);
         }

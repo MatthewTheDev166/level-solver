@@ -16,22 +16,16 @@ static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float 
         return true;
     }
 
-    // GD 2.2 percent check: >= 99% is essentially complete
-    if (playLayer->getCurrentPercent() >= 99.0f) {
+    // GD 2.2 percent check: strictly 100%
+    if (playLayer->getCurrentPercent() >= 100.0f) {
         return true;
     }
 
     float currentX = playLayer->m_player1->getPositionX();
     if (levelLength > startX + 50.0f) {
-        if (currentX >= (levelLength - 15.0f)) return true;
+        if (currentX >= (levelLength - 10.0f)) return true;
     } else {
         if (currentX >= levelLength) return true;
-    }
-
-    // Past all hazards and in final stretch (>= 85% of total level distance)
-    float totalDist = levelLength - startX;
-    if (lastHazardX > startX + 30.0f && currentX >= lastHazardX + 25.0f && totalDist > 50.0f && currentX >= startX + 0.85f * totalDist) {
-        return true;
     }
 
     return false;
@@ -380,54 +374,12 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
         }
     }
 
-    // 4. Dense Frame-by-Frame Raw Click Sweep (Cube, Robot, Ball, Spider)
-    bool isJumpMode = (mode == VehicleMode::Cube || mode == VehicleMode::Robot || mode == VehicleMode::Ball || mode == VehicleMode::Spider);
-    if (isJumpMode) {
-        // Unconditionally test single clicks across every tick t in [0, horizonTicks - 2]
-        for (uint32_t t = 0; t < horizonTicks - 1; ++t) {
-            // Standard jump (14 ticks)
-            std::vector<TickAction> stdJump;
-            stdJump.push_back({ t, true });
-            if (t + 14 < horizonTicks) {
-                stdJump.push_back({ t + 14, false });
+    // 4. Elitism: preserve top previous survivors if any survived
+    if (!previousSurvivors.empty() && waveRetryCount == 0) {
+        for (size_t i = 0; i < previousSurvivors.size() && i < 4; ++i) {
+            if (previousSurvivors[i].survived) {
+                addBotWithActions(previousSurvivors[i].segmentActions);
             }
-            addBotWithActions(stdJump);
-
-            // Full high jump (22 ticks)
-            std::vector<TickAction> fullJump;
-            fullJump.push_back({ t, true });
-            if (t + 22 < horizonTicks) {
-                fullJump.push_back({ t + 22, false });
-            }
-            addBotWithActions(fullJump);
-
-            // Hold from t to horizon end (essential for ramps and dash pads)
-            if (t % 2 == 0) {
-                addBotWithActions({ { t, true } });
-            }
-
-            // Micro-tap (8 ticks, for small hops / low ceiling)
-            if (t % 3 == 0) {
-                std::vector<TickAction> micro;
-                micro.push_back({ t, true });
-                if (t + 8 < horizonTicks) {
-                    micro.push_back({ t + 8, false });
-                }
-                addBotWithActions(micro);
-            }
-        }
-
-        // Multi-click / Double jump combinations
-        for (uint32_t t1 = 0; t1 + 18 < horizonTicks; t1 += 4) {
-            uint32_t t2 = t1 + 16;
-            std::vector<TickAction> dbl;
-            dbl.push_back({ t1, true });
-            dbl.push_back({ t1 + 10, false });
-            dbl.push_back({ t2, true });
-            if (t2 + 10 < horizonTicks) {
-                dbl.push_back({ t2 + 10, false });
-            }
-            addBotWithActions(dbl);
         }
     }
 
@@ -435,7 +387,10 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     float scanDistance = horizonTicks * unitsPerTick + 30.0f;
     auto interactables = HazardDetector::getInteractablesInWindow(startX, startX + scanDistance, levelObjects);
 
-    // Hazard approach window if hazards exist ahead
+    bool isJumpMode = (mode == VehicleMode::Cube || mode == VehicleMode::Robot || mode == VehicleMode::Ball || mode == VehicleMode::Spider);
+    bool isContinuous = (mode == VehicleMode::Ship || mode == VehicleMode::Wave || mode == VehicleMode::Swing || mode == VehicleMode::UFO);
+
+    // Hazard approach window if hazards exist ahead (guaranteed high priority slots)
     if (isJumpMode) {
         float nearestHazardX = -1.0f;
         if (levelObjects) {
@@ -475,7 +430,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
         }
     }
 
-    // Orb and Pad timing injection
+    // Orb and Pad timing injection (guaranteed high priority slots)
     for (auto obj : interactables) {
         if (!obj) continue;
         float ox = obj->getPositionX();
@@ -504,7 +459,6 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
     }
 
     // 6. Continuous flight modes (Wave, Ship, Swing, UFO)
-    bool isContinuous = (mode == VehicleMode::Ship || mode == VehicleMode::Wave || mode == VehicleMode::Swing || mode == VehicleMode::UFO);
     if (isContinuous) {
         // Multi-frequency micro-taps and varied duty cycles
         for (uint32_t period : { 1u, 2u, 3u, 4u, 5u, 6u, 8u, 10u, 12u, 16u }) {
@@ -575,12 +529,52 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
         }
     }
 
-    // 7. Elitism: preserve top previous survivors if any survived
-    if (!previousSurvivors.empty() && waveRetryCount == 0) {
-        for (size_t i = 0; i < previousSurvivors.size() && i < 4; ++i) {
-            if (previousSurvivors[i].survived) {
-                addBotWithActions(previousSurvivors[i].segmentActions);
+    // 7. Strided Click Sweep (Cube, Robot, Ball, Spider)
+    if (isJumpMode) {
+        for (uint32_t t = 0; t < horizonTicks - 1; t += 2) {
+            // Standard jump (14 ticks)
+            std::vector<TickAction> stdJump;
+            stdJump.push_back({ t, true });
+            if (t + 14 < horizonTicks) {
+                stdJump.push_back({ t + 14, false });
             }
+            addBotWithActions(stdJump);
+
+            // Full high jump (22 ticks)
+            std::vector<TickAction> fullJump;
+            fullJump.push_back({ t, true });
+            if (t + 22 < horizonTicks) {
+                fullJump.push_back({ t + 22, false });
+            }
+            addBotWithActions(fullJump);
+
+            // Hold from t to horizon end (essential for ramps and dash pads)
+            if (t % 4 == 0) {
+                addBotWithActions({ { t, true } });
+            }
+
+            // Micro-tap (8 ticks, for small hops / low ceiling)
+            if (t % 4 == 2) {
+                std::vector<TickAction> micro;
+                micro.push_back({ t, true });
+                if (t + 8 < horizonTicks) {
+                    micro.push_back({ t + 8, false });
+                }
+                addBotWithActions(micro);
+            }
+        }
+
+        // Multi-click / Double jump combinations
+        for (uint32_t t1 = 0; t1 + 18 < horizonTicks; t1 += 6) {
+            uint32_t t2 = t1 + 16;
+            std::vector<TickAction> dbl;
+            dbl.push_back({ t1, true });
+            dbl.push_back({ t1 + 10, false });
+            dbl.push_back({ t2, true });
+            if (t2 + 10 < horizonTicks) {
+                dbl.push_back({ t2 + 10, false });
+            }
+            addBotWithActions(dbl);
         }
     }
 
@@ -656,7 +650,7 @@ void SwarmSolver::simulateBot(
         playLayer->update(HeadlessEngine::FIXED_DT);
 
         // 1. Check level completion FIRST (before death / wall jam!)
-        if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX, m_lastHazardX)) {
+        if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
             completed = true;
             break;
         }
@@ -679,14 +673,8 @@ void SwarmSolver::simulateBot(
         bool goingLeft = playLayer->m_player1->m_isGoingLeft;
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
-            // Check if player has reached the End Wall (past all hazards or in final stretch)
-            bool isAtEndWall = false;
-            float totalDist = m_levelLength - m_startX;
-            if (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f) {
-                isAtEndWall = true;
-            } else if (totalDist > 50.0f && currX >= m_startX + 0.88f * totalDist) {
-                isAtEndWall = true;
-            }
+            // Check if player has reached the physical End Wall of the level
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f));
 
             if (isAtEndWall) {
                 // Reached the physical End Wall of the level! Mark level completed!
@@ -719,30 +707,32 @@ void SwarmSolver::simulateBot(
 
     // Calculate fitness score
     float fitness = 100.0f + (bot.finalX - checkpoint.startX);
-    fitness += std::min(bot.clearance, 60.0f) * 0.3f;
 
-    // Stable ground bonus for Cube/Robot/Ball/Spider vs clearance for Wave/Ship
     bool isJumpMode = (checkpoint.snapshot.mode == VehicleMode::Cube || checkpoint.snapshot.mode == VehicleMode::Robot || checkpoint.snapshot.mode == VehicleMode::Ball || checkpoint.snapshot.mode == VehicleMode::Spider);
-    if (isJumpMode) {
-        if (playLayer->m_player1->m_isOnGround) {
-            fitness += 35.0f;
-        } else if (std::abs(playLayer->m_player1->m_yVelocity) > 8.0f) {
-            fitness -= 15.0f; // Airborne falling penalty at segment boundary
-        }
-    } else {
-        // Continuous flying modes (Wave, Ship, Swing, UFO): wall clearance is paramount
-        fitness += std::min(bot.clearance, 60.0f) * 0.5f;
-    }
 
-    // Input cleanliness penalty: penalize excessive jumping on flat ground to stop metronomes
     size_t jumpCount = 0;
     for (const auto& act : bot.segmentActions) {
         if (act.pressed) jumpCount++;
     }
-    if (jumpCount == 0) {
-        fitness += 20.0f; // Reward pure safe idle
+
+    if (nearbyCount == 0) {
+        // Flat ground without hazards ahead: reward idle and ground stability
+        if (jumpCount == 0) {
+            fitness += 20.0f; // Reward pure safe idle
+        } else {
+            fitness -= (2.0f * static_cast<float>(jumpCount));
+        }
+        if (isJumpMode && playLayer->m_player1->m_isOnGround) {
+            fitness += 35.0f;
+        } else if (isJumpMode && std::abs(playLayer->m_player1->m_yVelocity) > 8.0f) {
+            fitness -= 15.0f; // Airborne falling penalty at segment boundary
+        }
     } else {
-        fitness -= (2.0f * static_cast<float>(jumpCount));
+        // Hazards ahead: clearance is paramount; do not penalize jumps or airborne flight
+        fitness += std::min(bot.clearance, 60.0f) * 0.8f;
+        if (!isJumpMode) {
+            fitness += std::min(bot.clearance, 60.0f) * 0.5f;
+        }
     }
 
     if (completed) {
@@ -797,7 +787,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (bot.finalX > m_maxReachedX) {
                 m_maxReachedX = bot.finalX;
             }
-            if (bot.fitnessScore >= 5000.0f || isSimulationFinished(playLayer, m_levelLength, currentCp.startX, m_lastHazardX)) {
+            if (bot.fitnessScore >= 5000.0f || isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
                 // Winning bot! Append actions and finalize
                 std::vector<TickAction> fullMacro = currentCp.macroHistory;
                 for (const auto& act : bot.segmentActions) {
@@ -858,6 +848,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (btn) playLayer->handleButton(true, 1, true);
             else playLayer->handleButton(false, 1, true);
 
+            bool advanceDied = false;
             for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
                 while (aIdx < bestBot.segmentActions.size() && bestBot.segmentActions[aIdx].tick <= s) {
                     btn = bestBot.segmentActions[aIdx].pressed;
@@ -868,8 +859,25 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                     lastB = btn;
                 }
                 playLayer->update(HeadlessEngine::FIXED_DT);
+                if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                    advanceDied = true;
+                    break;
+                }
             }
             playLayer->m_queuedButtons.clear();
+
+            if (advanceDied) {
+                geode::log::warn("[LevelSolver] Best bot died during checkpoint advance at tick {}! Discarding and retrying wave...",
+                    currentCp.startTick);
+                currentCp.failedWaves++;
+                m_activePopulation.clear();
+                m_currentWaveSurvivors.clear();
+                m_currentBotIndex = 0;
+                if (currentCp.failedWaves >= 10) {
+                    handleBacktrack(playLayer);
+                }
+                return;
+            }
 
             // Commit winning bot into a new BeamCheckpoint (exact parity with simulateBot)
             BeamCheckpoint nextCp;
@@ -1085,6 +1093,9 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     // 1. Sort actions by tick and compress into edge-triggered actions
     std::vector<TickAction> sortedActions = winningActions;
     std::sort(sortedActions.begin(), sortedActions.end(), [](const TickAction& a, const TickAction& b) {
+        if (a.tick == b.tick) {
+            return !a.pressed && b.pressed;
+        }
         return a.tick < b.tick;
     });
 
@@ -1101,6 +1112,9 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     }
 
     // 2. Verification simulation run from tick 0
+    playLayer->resetLevel();
+    playLayer->startGame();
+
     const auto& root = m_checkpointStack.front();
     if (root.nativeCheckpoint) {
         playLayer->loadFromCheckpoint(root.nativeCheckpoint);
@@ -1168,13 +1182,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         bool goingLeft = playLayer->m_player1->m_isGoingLeft;
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
-            bool isAtEndWall = false;
-            float totalDist = m_levelLength - m_startX;
-            if (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f) {
-                isAtEndWall = true;
-            } else if (totalDist > 50.0f && currX >= m_startX + 0.88f * totalDist) {
-                isAtEndWall = true;
-            }
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f));
             if (isAtEndWall) {
                 // Reached end wall cleanly in verification!
                 break;
@@ -1188,25 +1196,11 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition()); // Move camera ONCE at completion!
 
     if (!verified) {
-        // Restore active checkpoint so search continues safely without breaking tree
-        if (!m_checkpointStack.empty()) {
-            auto& activeCp = m_checkpointStack.back();
-            if (activeCp.nativeCheckpoint) {
-                playLayer->loadFromCheckpoint(activeCp.nativeCheckpoint);
-            }
-            activeCp.snapshot.restore(playLayer->m_player1);
-            if (activeCp.hasPlayer2 && playLayer->m_player2) {
-                activeCp.snapshot2.restore(playLayer->m_player2);
-            }
-            playLayer->m_started = true;
-            playLayer->m_inResetDelay = false;
-            playLayer->m_playerDied = false;
-            playLayer->m_player1->m_isDead = false;
-            playLayer->m_hasCompletedLevel = false;
-            playLayer->m_queuedButtons.clear();
-            activeCp.failedWaves++;
-        }
+        geode::log::warn("[LevelSolver] Verification failed! Backtracking to explore alternate branches...");
         m_activePopulation.clear();
+        m_currentWaveSurvivors.clear();
+        m_currentBotIndex = 0;
+        handleBacktrack(playLayer);
         return;
     }
 
