@@ -102,6 +102,11 @@ struct PlayerSnapshot {
     bool isDashing = false;
     bool isDead = false;
     bool isHolding = false;
+    cocos2d::CCPoint lastGroundedPos = {0.0f, 0.0f};
+    bool hasEverJumped = false;
+    bool isGoingLeft = false;
+    bool isOnSlope = false;
+    float slopeVelocity = 0.0f;
 
     uint32_t tick = 0;
     uint32_t rngSeed = 1337;
@@ -141,6 +146,11 @@ struct PlayerSnapshot {
         isDashing = player->m_isDashing;
         isDead = player->m_isDead;
         isHolding = player->buttonDown(PlayerButton::Jump);
+        lastGroundedPos = player->m_lastGroundedPos;
+        hasEverJumped = player->m_hasEverJumped;
+        isGoingLeft = player->m_isGoingLeft;
+        isOnSlope = player->m_isOnSlope;
+        slopeVelocity = player->m_slopeVelocity;
 
         tick = currentTick;
         rngSeed = currentSeed;
@@ -182,6 +192,11 @@ struct PlayerSnapshot {
         player->m_touchedPad = touchedPad;
         player->m_isDashing = isDashing;
         player->m_isDead = false;
+        player->m_lastGroundedPos = lastGroundedPos;
+        player->m_hasEverJumped = hasEverJumped;
+        player->m_isGoingLeft = isGoingLeft;
+        player->m_isOnSlope = isOnSlope;
+        player->m_slopeVelocity = slopeVelocity;
 
         if (isHolding) {
             player->pushButton(PlayerButton::Jump);

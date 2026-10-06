@@ -14,7 +14,7 @@ namespace solver {
 
 /**
  * AStarSolver: Forward state-space A* tree search with spatial hashing.
- * Note: BeamSolver (Reachable-State Search) is the primary solver driving TelemetryPopup.
+ * Note: SwarmSolver (Hazard-Aware Survival Swarm) is the primary solver driving TelemetryPopup.
  * AStarSolver is retained as a deterministic reference implementation.
  */
 class AStarSolver {

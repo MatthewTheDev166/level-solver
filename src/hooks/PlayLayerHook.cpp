@@ -7,7 +7,7 @@
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../engine/HeadlessEngine.hpp"
 #include "../solver/AStarSolver.hpp"
-#include "../solver/BeamSolver.hpp"
+#include "../solver/SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../ui/TelemetryPopup.hpp"
 
@@ -238,8 +238,8 @@ class $modify(SolverPlayLayer, PlayLayer) {
     }
 
     void onQuit() {
-        if (solver::BeamSolver::get().isRunning()) {
-            solver::BeamSolver::get().stop();
+        if (solver::SwarmSolver::get().isRunning()) {
+            solver::SwarmSolver::get().stop();
         }
         if (solver::AStarSolver::get().isRunning()) {
             solver::AStarSolver::get().stop();

@@ -4,7 +4,7 @@
 #include <Geode/ui/Popup.hpp>
 #include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/PlayLayer.hpp>
-#include "../solver/BeamSolver.hpp"
+#include "../solver/SwarmSolver.hpp"
 
 namespace solver {
 
