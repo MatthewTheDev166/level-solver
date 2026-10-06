@@ -67,6 +67,7 @@ private:
     std::string m_levelName;
     float m_startX = 0.0f;
     float m_levelLength = 0.0f;
+    float m_lastHazardX = 0.0f;
     float m_maxReachedX = 0.0f;
     uint32_t m_currentTick = 0;
 

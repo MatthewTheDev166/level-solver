@@ -10,17 +10,28 @@
 
 namespace solver {
 
-static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float startX) {
+static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float startX, float lastHazardX = 0.0f) {
     if (!playLayer || !playLayer->m_player1) return false;
     if (playLayer->m_hasCompletedLevel) {
         return true;
     }
 
+    // GD 2.2 percent check: >= 99% is essentially complete
+    if (playLayer->getCurrentPercent() >= 99.0f) {
+        return true;
+    }
+
     float currentX = playLayer->m_player1->getPositionX();
     if (levelLength > startX + 50.0f) {
-        if (currentX >= (levelLength - 10.0f)) return true;
+        if (currentX >= (levelLength - 15.0f)) return true;
     } else {
         if (currentX >= levelLength) return true;
+    }
+
+    // Past all hazards and in final stretch (>= 85% of total level distance)
+    float totalDist = levelLength - startX;
+    if (lastHazardX > startX + 30.0f && currentX >= lastHazardX + 25.0f && totalDist > 50.0f && currentX >= startX + 0.85f * totalDist) {
+        return true;
     }
 
     return false;
@@ -57,11 +68,18 @@ void SwarmSolver::start(PlayLayer* playLayer) {
 
     m_startX = playLayer->m_player1->getPositionX();
     float maxObjX = m_startX;
+    m_lastHazardX = m_startX;
     if (playLayer->m_objects) {
         for (unsigned int i = 0; i < playLayer->m_objects->count(); ++i) {
             if (auto obj = static_cast<GameObject*>(playLayer->m_objects->objectAtIndex(i))) {
-                if (obj->getPositionX() > maxObjX) {
-                    maxObjX = obj->getPositionX();
+                float ox = obj->getPositionX();
+                if (ox > maxObjX) {
+                    maxObjX = ox;
+                }
+                if (HazardDetector::isHazardObject(obj)) {
+                    if (ox > m_lastHazardX) {
+                        m_lastHazardX = ox;
+                    }
                 }
             }
         }
@@ -75,6 +93,9 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     } else {
         m_levelLength = m_startX + 600.0f; // Blank level fallback
     }
+
+    geode::log::info("[LevelSolver] Level bounds: startX={:.1f}, levelLength={:.1f}, lastHazardX={:.1f}",
+        m_startX, m_levelLength, m_lastHazardX);
 
     m_maxReachedX = m_startX;
     m_currentTick = 0;
@@ -189,6 +210,7 @@ void SwarmSolver::reset() {
     m_currentBotIndex = 0;
     m_startX = 0.0f;
     m_levelLength = 0.0f;
+    m_lastHazardX = 0.0f;
     m_maxReachedX = 0.0f;
     m_currentTick = 0;
     m_activeWaveIndex = 0;
@@ -222,7 +244,7 @@ bool SwarmSolver::runSelfTest(PlayLayer* playLayer) {
             reachedEndWithoutDying = false;
             break;
         }
-        if (isSimulationFinished(playLayer, m_levelLength, m_startX)) {
+        if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
             break;
         }
     }
@@ -351,6 +373,9 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 int newT = static_cast<int>(act.tick) + delta;
                 act.tick = static_cast<uint32_t>(std::clamp(newT, 0, static_cast<int>(horizonTicks - 1)));
             }
+            std::sort(mutated.begin(), mutated.end(), [](const TickAction& a, const TickAction& b) {
+                return a.tick < b.tick;
+            });
             addBotWithActions(mutated);
         }
     }
@@ -631,7 +656,7 @@ void SwarmSolver::simulateBot(
         playLayer->update(HeadlessEngine::FIXED_DT);
 
         // 1. Check level completion FIRST (before death / wall jam!)
-        if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX)) {
+        if (isSimulationFinished(playLayer, m_levelLength, checkpoint.startX, m_lastHazardX)) {
             completed = true;
             break;
         }
@@ -654,6 +679,21 @@ void SwarmSolver::simulateBot(
         bool goingLeft = playLayer->m_player1->m_isGoingLeft;
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
+            // Check if player has reached the End Wall (past all hazards or in final stretch)
+            bool isAtEndWall = false;
+            float totalDist = m_levelLength - m_startX;
+            if (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f) {
+                isAtEndWall = true;
+            } else if (totalDist > 50.0f && currX >= m_startX + 0.88f * totalDist) {
+                isAtEndWall = true;
+            }
+
+            if (isAtEndWall) {
+                // Reached the physical End Wall of the level! Mark level completed!
+                completed = true;
+                break;
+            }
+
             jammedTicks++;
             if (jammedTicks >= 4) {
                 bot.survived = false;
@@ -757,7 +797,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (bot.finalX > m_maxReachedX) {
                 m_maxReachedX = bot.finalX;
             }
-            if (isSimulationFinished(playLayer, m_levelLength, currentCp.startX)) {
+            if (bot.fitnessScore >= 5000.0f || isSimulationFinished(playLayer, m_levelLength, currentCp.startX, m_lastHazardX)) {
                 // Winning bot! Append actions and finalize
                 std::vector<TickAction> fullMacro = currentCp.macroHistory;
                 for (const auto& act : bot.segmentActions) {
@@ -1042,10 +1082,15 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     geode::log::info("[LevelSolver] Swarm reached 100%! Verifying complete macro with {} inputs...",
         winningActions.size());
 
-    // 1. Compress into edge-triggered actions
+    // 1. Sort actions by tick and compress into edge-triggered actions
+    std::vector<TickAction> sortedActions = winningActions;
+    std::sort(sortedActions.begin(), sortedActions.end(), [](const TickAction& a, const TickAction& b) {
+        return a.tick < b.tick;
+    });
+
     std::vector<TickAction> compressed;
     bool lastBtn = false;
-    for (const auto& act : winningActions) {
+    for (const auto& act : sortedActions) {
         if (act.pressed != lastBtn) {
             compressed.push_back(act);
             lastBtn = act.pressed;
@@ -1079,7 +1124,13 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     bool currBtn = false;
     bool lastSimBtn = false;
     bool verified = true;
-    uint32_t totalTicks = compressed.empty() ? 24000 : (compressed.back().tick + 240);
+
+    uint32_t targetEndTick = m_checkpointStack.empty() ? 0 : (m_checkpointStack.back().startTick + m_currentHorizonTicks);
+    uint32_t totalTicks = std::max(targetEndTick + 60, (compressed.empty() ? 0u : compressed.back().tick) + 120);
+    if (totalTicks == 0) totalTicks = 2400;
+
+    float prevX = playLayer->m_player1->getPositionX();
+    uint32_t jammedTicks = 0;
 
     for (uint32_t t = 0; t <= totalTicks; ++t) {
         while (actIdx < compressed.size() && compressed[actIdx].tick <= t) {
@@ -1096,7 +1147,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         }
 
         playLayer->update(HeadlessEngine::FIXED_DT);
-        playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+        // Note: Do NOT call moveCameraToPos inside headless loop to prevent UI freeze!
 
         bool dead = playLayer->m_player1->m_isDead ||
                     (playLayer->m_player2 && playLayer->m_player2->m_isDead) ||
@@ -1108,13 +1159,33 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
             break;
         }
 
-        if (isSimulationFinished(playLayer, m_levelLength, m_startX)) {
+        if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
             break;
         }
+
+        // End wall check during verification
+        float currX = playLayer->m_player1->getPositionX();
+        bool goingLeft = playLayer->m_player1->m_isGoingLeft;
+        float dx = goingLeft ? (prevX - currX) : (currX - prevX);
+        if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
+            bool isAtEndWall = false;
+            float totalDist = m_levelLength - m_startX;
+            if (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f) {
+                isAtEndWall = true;
+            } else if (totalDist > 50.0f && currX >= m_startX + 0.88f * totalDist) {
+                isAtEndWall = true;
+            }
+            if (isAtEndWall) {
+                // Reached end wall cleanly in verification!
+                break;
+            }
+        }
+        prevX = currX;
     }
 
     if (lastSimBtn) playLayer->handleButton(false, 1, true);
     playLayer->m_queuedButtons.clear();
+    playLayer->moveCameraToPos(playLayer->m_player1->getPosition()); // Move camera ONCE at completion!
 
     if (!verified) {
         // Restore active checkpoint so search continues safely without breaking tree
@@ -1134,6 +1205,7 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
             playLayer->m_hasCompletedLevel = false;
             playLayer->m_queuedButtons.clear();
         }
+        m_activePopulation.clear();
         return;
     }
 
