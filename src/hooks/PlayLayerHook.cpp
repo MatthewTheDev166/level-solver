@@ -145,6 +145,8 @@ class $modify(SolverFMODAudioEngine, FMODAudioEngine) {
 class $modify(SolverPlayLayer, PlayLayer) {
     static void onModify(auto& self) {
         (void)self.setHookPriority("PlayLayer::destroyPlayer", geode::Priority::First);
+        (void)self.setHookPriority("PlayLayer::updateVisibility", geode::Priority::First);
+        (void)self.setHookPriority("PlayLayer::postUpdate", geode::Priority::First);
     }
 
     ~SolverPlayLayer() {
@@ -179,7 +181,17 @@ class $modify(SolverPlayLayer, PlayLayer) {
         }
     }
 
+    void updateVisibility(float dt) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            return;
+        }
+        PlayLayer::updateVisibility(dt);
+    }
+
     void postUpdate(float dt) {
+        if (solver::HeadlessEngine::get().isHeadless()) {
+            return;
+        }
         PlayLayer::postUpdate(dt);
         updateReplayBadge(this);
     }
