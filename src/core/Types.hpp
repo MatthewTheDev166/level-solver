@@ -107,6 +107,9 @@ struct PlayerSnapshot {
     bool isGoingLeft = false;
     bool isOnSlope = false;
     float slopeVelocity = 0.0f;
+    bool isSideways = false;
+    bool touchedCustomRing = false;
+    bool touchedGravityPortal = false;
 
     uint32_t tick = 0;
     uint32_t rngSeed = 1337;
@@ -151,6 +154,9 @@ struct PlayerSnapshot {
         isGoingLeft = player->m_isGoingLeft;
         isOnSlope = player->m_isOnSlope;
         slopeVelocity = player->m_slopeVelocity;
+        isSideways = player->m_isSideways;
+        touchedCustomRing = player->m_touchedCustomRing;
+        touchedGravityPortal = player->m_touchedGravityPortal;
 
         tick = currentTick;
         rngSeed = currentSeed;
@@ -197,6 +203,9 @@ struct PlayerSnapshot {
         player->m_isGoingLeft = isGoingLeft;
         player->m_isOnSlope = isOnSlope;
         player->m_slopeVelocity = slopeVelocity;
+        player->m_isSideways = isSideways;
+        player->m_touchedCustomRing = touchedCustomRing;
+        player->m_touchedGravityPortal = touchedGravityPortal;
 
         if (isHolding) {
             player->pushButton(PlayerButton::Jump);

@@ -105,7 +105,7 @@ class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     }
 
     void handleButton(bool down, int button, bool isPlayer1) {
-        if (solver::MacroManager::get().isPlaying() && !solver::MacroManager::get().isDispatchingInput()) {
+        if (solver::MacroManager::get().isReplaying() && !solver::MacroManager::get().isDispatchingInput()) {
             return;
         }
         GJBaseGameLayer::handleButton(down, button, isPlayer1);

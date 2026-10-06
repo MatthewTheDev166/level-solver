@@ -231,18 +231,23 @@ bool SwarmSolver::runSelfTest(PlayLayer* playLayer) {
         playLayer->loadFromCheckpoint(root.nativeCheckpoint);
     }
     root.snapshot.restore(playLayer->m_player1);
+    if (root.hasPlayer2 && playLayer->m_player2) {
+        root.snapshot2.restore(playLayer->m_player2);
+    }
 
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
+    if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
     playLayer->m_queuedButtons.clear();
     playLayer->m_player1->releaseButton(PlayerButton::Jump);
+    if (playLayer->m_player2) playLayer->m_player2->releaseButton(PlayerButton::Jump);
 
     bool reachedEndWithoutDying = false;
     for (uint32_t t = 0; t < 600; ++t) {
         playLayer->update(HeadlessEngine::FIXED_DT);
-        if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+        if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
             break;
         }
         if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
@@ -256,8 +261,12 @@ bool SwarmSolver::runSelfTest(PlayLayer* playLayer) {
         playLayer->loadFromCheckpoint(root.nativeCheckpoint);
     }
     root.snapshot.restore(playLayer->m_player1);
+    if (root.hasPlayer2 && playLayer->m_player2) {
+        root.snapshot2.restore(playLayer->m_player2);
+    }
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
+    if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
     playLayer->m_queuedButtons.clear();
 
     if (reachedEndWithoutDying) {
@@ -332,14 +341,22 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                             });
                             addBotWithActions(flipped);
 
-                            // Also try a quick micro-pulse (2-tick tap) at flip point
-                            if (flipT + 2 < horizonTicks) {
-                                std::vector<TickAction> pulse = flipped;
-                                pulse.push_back({ flipT + 2, curState });
-                                std::sort(pulse.begin(), pulse.end(), [](const TickAction& a, const TickAction& b) {
+                            // Also try a quick micro-pulse (1-tick or 2-tick tap) at flip point
+                            if (flipT + 1 < horizonTicks) {
+                                std::vector<TickAction> pulse1 = flipped;
+                                pulse1.push_back({ flipT + 1, curState });
+                                std::sort(pulse1.begin(), pulse1.end(), [](const TickAction& a, const TickAction& b) {
                                     return a.tick < b.tick;
                                 });
-                                addBotWithActions(pulse);
+                                addBotWithActions(pulse1);
+                            }
+                            if (flipT + 2 < horizonTicks) {
+                                std::vector<TickAction> pulse2 = flipped;
+                                pulse2.push_back({ flipT + 2, curState });
+                                std::sort(pulse2.begin(), pulse2.end(), [](const TickAction& a, const TickAction& b) {
+                                    return a.tick < b.tick;
+                                });
+                                addBotWithActions(pulse2);
                             }
                         }
                     }
@@ -425,7 +442,7 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                 int takeoff = reachTick - lead;
                 if (takeoff >= 0 && takeoff < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(takeoff);
-                    for (uint32_t dur : { 6u, 12u, 18u, 24u, 36u, 48u }) {
+                    for (uint32_t dur : { (mode == VehicleMode::Robot ? 2u : 6u), (mode == VehicleMode::Robot ? 4u : 12u), 12u, 18u, 24u, 36u, 48u }) {
                         std::vector<TickAction> acts;
                         acts.push_back({ t, true });
                         if (t + dur < horizonTicks) {
@@ -448,12 +465,12 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
             int orbTick = static_cast<int>(std::round(distToOrb / unitsPerTick));
             bool isDash = HazardDetector::isDashOrb(obj);
 
-            for (int offset = -6; offset <= 6; offset += 2) {
+            for (int offset = -8; offset <= 8; offset += 2) {
                 int tapTick = orbTick + offset;
                 if (tapTick >= 0 && tapTick < static_cast<int>(horizonTicks)) {
                     uint32_t t = static_cast<uint32_t>(tapTick);
                     if (isDash) {
-                        for (uint32_t dur : { 10u, 20u, 30u, 45u }) {
+                        for (uint32_t dur : { 4u, 8u, 14u, 22u, 32u, 45u }) {
                             std::vector<TickAction> acts;
                             if (t > 4) acts.push_back({ t - 4, false });
                             acts.push_back({ t, true });
@@ -622,10 +639,11 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
         std::vector<TickAction> rndActs;
         uint32_t curT = rng() % 6;
         bool curSt = (rng() % 2 == 1);
+        uint32_t minDur = (mode == VehicleMode::Wave) ? 1u : 2u;
         uint32_t maxDur = (mode == VehicleMode::Wave) ? 8u : 24u;
         while (curT < horizonTicks) {
             rndActs.push_back({ curT, curSt });
-            uint32_t dur = 2 + (rng() % maxDur);
+            uint32_t dur = minDur + (rng() % maxDur);
             curT += dur;
             curSt = !curSt;
         }
@@ -886,6 +904,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_inResetDelay = false;
             playLayer->m_playerDied = false;
             playLayer->m_player1->m_isDead = false;
+            if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
             playLayer->m_hasCompletedLevel = false;
             playLayer->m_queuedButtons.clear();
 
@@ -907,7 +926,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                     aIdx++;
                 }
                 playLayer->update(HeadlessEngine::FIXED_DT);
-                if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
                     advanceDied = true;
                     break;
                 }
@@ -1051,6 +1070,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         playLayer->m_inResetDelay = false;
         playLayer->m_playerDied = false;
         playLayer->m_player1->m_isDead = false;
+        if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
         playLayer->m_hasCompletedLevel = false;
         playLayer->m_queuedButtons.clear();
 
@@ -1072,7 +1092,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
                 aIdx++;
             }
             playLayer->update(HeadlessEngine::FIXED_DT);
-            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+            if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
                 died = true;
                 break;
             }
@@ -1126,6 +1146,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
+    if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
     playLayer->m_hasCompletedLevel = false;
     playLayer->m_queuedButtons.clear();
 
@@ -1254,6 +1275,8 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
 
     if (lastSimBtn) playLayer->handleButton(false, 1, true);
     playLayer->m_queuedButtons.clear();
+    if (playLayer->m_player1) playLayer->m_player1->releaseButton(PlayerButton::Jump);
+    if (playLayer->m_player2) playLayer->m_player2->releaseButton(PlayerButton::Jump);
     playLayer->moveCameraToPos(playLayer->m_player1->getPosition()); // Move camera ONCE at completion!
 
     if (!verified) {

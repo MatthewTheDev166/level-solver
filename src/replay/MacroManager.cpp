@@ -240,6 +240,9 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
         if (playLayer->m_player1) {
             playLayer->m_player1->releaseButton(PlayerButton::Jump);
         }
+        if (playLayer->m_player2) {
+            playLayer->m_player2->releaseButton(PlayerButton::Jump);
+        }
         m_isDispatchingInput = false;
     }
 
@@ -323,6 +326,9 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
                 if (playLayer->m_player1) {
                     playLayer->m_player1->releaseButton(PlayerButton::Jump);
                 }
+                if (playLayer->m_player2) {
+                    playLayer->m_player2->releaseButton(PlayerButton::Jump);
+                }
                 m_isDispatchingInput = false;
                 m_lastButtonState = false;
             }
@@ -342,6 +348,9 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
         playLayer->handleButton(false, 1, true);
         if (playLayer->m_player1) {
             playLayer->m_player1->releaseButton(PlayerButton::Jump);
+        }
+        if (playLayer->m_player2) {
+            playLayer->m_player2->releaseButton(PlayerButton::Jump);
         }
         m_isDispatchingInput = false;
     }
