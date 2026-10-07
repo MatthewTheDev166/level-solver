@@ -54,6 +54,9 @@ public:
     size_t getTotalActions() const;
     uint32_t getTotalTicks() const;
 
+    int getArmedLevelID() const { return m_armedLevelID; }
+    const std::string& getArmedLevelName() const { return m_armedLevelName; }
+
     // Compatibility helpers
     void queueReplay(int levelID, const std::string& levelName = "") { armReplay(levelID, levelName); }
     bool hasPendingReplay() const { return isArmed(); }

@@ -181,7 +181,7 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
         m_trajectorySamples = loadedTraj;
         geode::log::info("[LevelSolver] Loaded {} inputs (and {} trajectory points) from {}",
             m_actions.size(), m_trajectorySamples.size(), filePath.string());
-        return !m_actions.empty();
+        return true;
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception loading macro: {}", e.what());
         return false;
@@ -191,15 +191,20 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
 bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
     auto filePath = getMacroPath(levelID, levelName);
     std::error_code ec;
+    bool exists = std::filesystem::exists(filePath, ec);
+    if (ec || !exists) return false;
     auto size = std::filesystem::file_size(filePath, ec);
-    return !ec && size > 64;
+    return !ec && size > 0;
 }
 
 void MacroManager::armReplay(int levelID, const std::string& levelName) {
-    if (!loadMacro(levelID, levelName) || m_actions.empty()) {
-        geode::log::warn("[LevelSolver] Cannot arm replay: macro empty or failed to load");
-        m_replaySessionActive = false;
-        return;
+    if (m_actions.empty()) {
+        if (!loadMacro(levelID, levelName)) {
+            geode::log::warn("[LevelSolver] Cannot arm replay: macro file not found for level {} ('{}')", levelID, levelName);
+            m_replaySessionActive = false;
+            m_state = ReplayState::Idle;
+            return;
+        }
     }
 
     m_armedLevelID = levelID;
@@ -209,6 +214,9 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
     m_lastButtonState = false;
     m_state = ReplayState::Armed;
     m_replaySessionActive = true;
+    m_hasDesync = false;
+    m_desyncLogged = false;
+    m_desyncTick = 0;
     DeterministicPRNG::clampSeed();
 
     CheatAPIIntegrator::notifyCheatStarted();
@@ -217,7 +225,7 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
 }
 
 void MacroManager::onLevelReset(PlayLayer* playLayer) {
-    if (!m_replaySessionActive || m_actions.empty()) {
+    if (!m_replaySessionActive) {
         if (playLayer && m_lastButtonState) {
             m_isDispatchingInput = true;
             playLayer->handleButton(false, 1, true);
@@ -261,7 +269,7 @@ void MacroManager::onLevelReset(PlayLayer* playLayer) {
 }
 
 void MacroManager::onGameStart(PlayLayer* playLayer) {
-    if (!m_replaySessionActive || m_actions.empty()) return;
+    if (!m_replaySessionActive) return;
 
     DeterministicPRNG::clampSeed();
     m_playbackTick = 0;
@@ -363,20 +371,22 @@ void MacroManager::stopReplay(PlayLayer* playLayer) {
     m_hasDesync = false;
     m_desyncLogged = false;
     m_desyncTick = 0;
+    m_armedLevelID = 0;
+    m_armedLevelName.clear();
     CheatAPIIntegrator::notifyCheatEnded();
     geode::log::info("[LevelSolver] Replay stopped and disarmed");
 }
 
 bool MacroManager::isArmed() const {
-    return m_state == ReplayState::Armed;
+    return m_replaySessionActive && m_state == ReplayState::Armed;
 }
 
 bool MacroManager::isPlaying() const {
-    return m_state == ReplayState::Playing;
+    return m_replaySessionActive && m_state == ReplayState::Playing;
 }
 
 bool MacroManager::isReplaying() const {
-    return m_state == ReplayState::Armed || m_state == ReplayState::Playing || m_state == ReplayState::Finished;
+    return m_replaySessionActive && (m_state == ReplayState::Armed || m_state == ReplayState::Playing || m_state == ReplayState::Finished);
 }
 
 bool MacroManager::isDispatchingInput() const {

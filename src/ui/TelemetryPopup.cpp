@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.5.3";
+    std::string verStr = "v1.5.4";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -461,41 +461,36 @@ void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
+    if (SwarmSolver::get().isCompleted()) {
+        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+        MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
+        MacroManager::get().saveMacro(levelID, levelName);
+    } else if (MacroManager::get().hasMacro(levelID, levelName)) {
+        MacroManager::get().loadMacro(levelID, levelName);
+    } else {
         FLAlertLayer::create("No Macro", "No solved macro found for this level to export.", "OK")->show();
         return;
     }
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
-        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
-        MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
-        MacroManager::get().saveMacro(levelID, levelName);
-    } else {
-        MacroManager::get().loadMacro(levelID, levelName);
-    }
-
     const auto& actions = MacroManager::get().getActions();
-    if (actions.empty()) {
-        FLAlertLayer::create("No Actions", "Macro contains no recorded actions to export.", "OK")->show();
-        return;
-    }
-
-    auto exportRes = GDRExporter::exportReplays(levelName, levelID, actions);
+    auto exportRes = GDRExporter::exportReplays(levelName, levelID, actions, m_level->isPlatformer());
     std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
 
     if (exportRes.success) {
         std::string alertMsg = fmt::format(
-            "Macro exported to Mega Hack!\n\n"
-            "File: replays/{}-macro.gdr2\n"
-            "(also replays/{}-macro.json)\n\n"
-            "To play via Mega Hack:\n"
-            "Press Tab -> Replay -> select macro -> Load\n\n"
-            "Replay is also saved for built-in playback!",
-            safeName, safeName
+            "Macro exported successfully!\n\n"
+            "Files:\n"
+            "• replays/{}-macro.gdr2\n"
+            "• replays/{}-macro.gdr\n"
+            "• replays/{}-macro.json\n\n"
+            "Total actions: {}\n\n"
+            "Compatible with Mega Hack, ReplayBot, and Level Solver!",
+            safeName, safeName, safeName, actions.size()
         );
         FLAlertLayer::create("Macro Exported", alertMsg.c_str(), "OK")->show();
     } else {
-        FLAlertLayer::create("Export Failed", "Failed to export macro files to replays directory.", "OK")->show();
+        std::string err = exportRes.errorMessage.empty() ? "Failed to write replay files to replays directory." : exportRes.errorMessage;
+        FLAlertLayer::create("Export Failed", fmt::format("Export failed: {}", err).c_str(), "OK")->show();
     }
 }
 
@@ -512,26 +507,25 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && !SwarmSolver::get().isCompleted()) {
+    if (SwarmSolver::get().isCompleted()) {
+        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
+        MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
+        MacroManager::get().saveMacro(levelID, levelName);
+    } else if (MacroManager::get().hasMacro(levelID, levelName)) {
+        MacroManager::get().loadMacro(levelID, levelName);
+    } else {
         FLAlertLayer::create("No Macro", "No solved macro found for this level.", "OK")->show();
         return;
     }
 
-    if (!MacroManager::get().hasMacro(levelID, levelName) && SwarmSolver::get().isCompleted()) {
-        MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
-        MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
-        MacroManager::get().saveMacro(levelID, levelName);
-    } else {
-        MacroManager::get().loadMacro(levelID, levelName);
-    }
+    // Clean up headless PlayLayer BEFORE arming replay so headless destruction does not reset replay state
+    cleanupHeadless();
 
-    // Explicitly activate replay session so it persists across respawns and restarts
-    MacroManager::get().setReplaySessionActive(true);
+    // Arm replay session for this level
     MacroManager::get().armReplay(levelID, levelName);
 
     // If currently inside an active scene PlayLayer
     if (m_previousPlayLayer && m_previousPlayLayer != m_headlessPlayLayer) {
-        cleanupHeadless();
         if (auto scene = cocos2d::CCDirector::sharedDirector()->getRunningScene()) {
             if (auto pauseLayer = scene->getChildByType<PauseLayer>(0)) {
                 pauseLayer->onResume(nullptr);
@@ -542,11 +536,9 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         return;
     }
 
-    cleanupHeadless();
-
     // Transition to gameplay scene to watch playback
     auto scene = PlayLayer::scene(m_level, false, false);
-    CCDirector::sharedDirector()->pushScene(scene);
+    CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.5f, scene));
 
     this->onClose(nullptr);
 }

@@ -9,6 +9,7 @@ namespace solver {
 
 struct ExportResult {
     bool success = false;
+    std::filesystem::path gdrPath;
     std::filesystem::path gdr2Path;
     std::filesystem::path jsonPath;
     std::string errorMessage;

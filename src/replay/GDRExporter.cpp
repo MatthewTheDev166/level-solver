@@ -64,10 +64,6 @@ ExportResult GDRExporter::exportReplays(
     bool isPlatformer
 ) {
     ExportResult result;
-    if (actions.empty()) {
-        result.errorMessage = "No actions to export";
-        return result;
-    }
 
     std::string safeName = sanitizeFilename(levelName, levelID);
     auto replaysDir = getMegaHackReplaysDir();
@@ -76,9 +72,13 @@ ExportResult GDRExporter::exportReplays(
     std::filesystem::create_directories(replaysDir, ec);
 
     result.gdr2Path = replaysDir / fmt::format("{}-macro.gdr2", safeName);
+    result.gdrPath  = replaysDir / fmt::format("{}-macro.gdr", safeName);
     result.jsonPath = replaysDir / fmt::format("{}-macro.json", safeName);
 
-    // 1. Export Native GDReplayFormat v2 (.gdr2)
+    uint32_t validLevelID = (levelID > 0) ? static_cast<uint32_t>(levelID) : 0;
+    std::string effectiveLevelName = levelName.empty() ? safeName : levelName;
+
+    // 1. Export Native GDReplayFormat (.gdr2 and .gdr)
     try {
         gdr::Replay replay("LevelSolver", 1);
         replay.author = "LevelSolver";
@@ -86,7 +86,7 @@ ExportResult GDRExporter::exportReplays(
         replay.gameVersion = 22081;
         replay.framerate = 240.0;
         replay.platformer = isPlatformer;
-        replay.levelInfo = gdr::Level(levelName.empty() ? safeName : levelName, static_cast<uint32_t>(levelID));
+        replay.levelInfo = gdr::Level(effectiveLevelName, validLevelID);
 
         uint64_t maxTick = 0;
         for (const auto& act : actions) {
@@ -95,17 +95,45 @@ ExportResult GDRExporter::exportReplays(
                 maxTick = act.tick;
             }
         }
-        replay.duration = static_cast<float>(maxTick) / 240.0f;
+        replay.duration = (maxTick > 0) ? (static_cast<float>(maxTick) / 240.0f) : 1.0f;
         replay.sortInputs();
 
-        auto exportRes = replay.exportData(result.gdr2Path);
-        if (exportRes.isOk()) {
-            geode::log::info("[LevelSolver] Successfully exported native GDR2 macro to: {}", result.gdr2Path.string());
+        auto exportBytes = replay.exportData();
+        if (exportBytes.isOk()) {
+            const auto& bytes = exportBytes.unwrap();
+
+            // Save .gdr2
+            std::ofstream fGdr2(result.gdr2Path, std::ios::binary);
+            if (fGdr2.is_open()) {
+                fGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            }
+
+            // Save .gdr
+            std::ofstream fGdr(result.gdrPath, std::ios::binary);
+            if (fGdr.is_open()) {
+                fGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            }
+
+            // Also write plain {safeName}.gdr and {safeName}.gdr2 for maximum tool compatibility
+            auto plainGdr2 = replaysDir / fmt::format("{}.gdr2", safeName);
+            std::ofstream fPlainGdr2(plainGdr2, std::ios::binary);
+            if (fPlainGdr2.is_open()) {
+                fPlainGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            }
+
+            auto plainGdr = replaysDir / fmt::format("{}.gdr", safeName);
+            std::ofstream fPlainGdr(plainGdr, std::ios::binary);
+            if (fPlainGdr.is_open()) {
+                fPlainGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            }
+
+            geode::log::info("[LevelSolver] Successfully exported native GDR2/GDR macros to: {} and {}",
+                result.gdr2Path.string(), result.gdrPath.string());
         } else {
-            geode::log::error("[LevelSolver] Failed to export GDR2 macro: {}", exportRes.unwrapErr());
+            geode::log::error("[LevelSolver] Failed to serialize GDR data: {}", exportBytes.unwrapErr());
         }
     } catch (const std::exception& e) {
-        geode::log::error("[LevelSolver] Exception exporting GDR2 macro: {}", e.what());
+        geode::log::error("[LevelSolver] Exception exporting GDR macro: {}", e.what());
     }
 
     // 2. Export GDR JSON (.json) for Mega Hack Converter tool
@@ -118,7 +146,7 @@ ExportResult GDRExporter::exportReplays(
         for (const auto& act : actions) {
             if (act.tick > maxTick) maxTick = act.tick;
         }
-        root["duration"] = static_cast<double>(maxTick) / 240.0;
+        root["duration"] = (maxTick > 0) ? (static_cast<double>(maxTick) / 240.0) : 1.0;
         root["gameVersion"] = 22081;
         root["framerate"] = 240.0;
         root["seed"] = 1337;
@@ -132,8 +160,8 @@ ExportResult GDRExporter::exportReplays(
         root["bot"] = botObj;
 
         matjson::Value levelObj = matjson::Value::object();
-        levelObj["id"] = levelID;
-        levelObj["name"] = levelName.empty() ? safeName : levelName;
+        levelObj["id"] = validLevelID;
+        levelObj["name"] = effectiveLevelName;
         root["level"] = levelObj;
 
         matjson::Value inputsArr = matjson::Value::array();
@@ -147,17 +175,28 @@ ExportResult GDRExporter::exportReplays(
         }
         root["inputs"] = inputsArr;
 
+        std::string jsonDump = root.dump(matjson::NO_INDENTATION);
+
         std::ofstream jsonFile(result.jsonPath);
         if (jsonFile.is_open()) {
-            jsonFile << root.dump(matjson::NO_INDENTATION);
+            jsonFile << jsonDump;
             jsonFile.close();
             geode::log::info("[LevelSolver] Successfully exported GDR JSON macro to: {}", result.jsonPath.string());
+        }
+
+        auto plainJson = replaysDir / fmt::format("{}.json", safeName);
+        std::ofstream plainJsonFile(plainJson);
+        if (plainJsonFile.is_open()) {
+            plainJsonFile << jsonDump;
+            plainJsonFile.close();
         }
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception exporting GDR JSON macro: {}", e.what());
     }
 
-    result.success = std::filesystem::exists(result.gdr2Path) || std::filesystem::exists(result.jsonPath);
+    result.success = std::filesystem::exists(result.gdr2Path) ||
+                     std::filesystem::exists(result.gdrPath) ||
+                     std::filesystem::exists(result.jsonPath);
     return result;
 }
 
