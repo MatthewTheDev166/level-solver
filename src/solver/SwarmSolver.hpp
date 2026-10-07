@@ -65,7 +65,7 @@ private:
     );
 
     // Commit a solution upon reaching 100%
-    void finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions);
+    void finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions, uint32_t completionTick = 0);
 
     SolverMode m_solverMode = SolverMode::SpawnRespawn;
     bool m_isRunning = false;

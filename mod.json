@@ -8,7 +8,7 @@
 	},
 	"id": "matthew.level-solver",
 	"name": "Level Solver",
-	"version": "v1.6.0",
+	"version": "v1.6.1",
 	"developer": "Matthew",
 	"description": "Autonomous in-engine level solver using deterministic prefix-locked swarm simulation at 240 TPS.",
 	"dependencies": {

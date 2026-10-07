@@ -77,6 +77,7 @@ ExportResult GDRExporter::exportReplays(
     const std::string& levelName,
     int levelID,
     const std::vector<TickAction>& actions,
+    uint32_t completionTick,
     bool isPlatformer
 ) {
     ExportResult result;
@@ -104,7 +105,7 @@ ExportResult GDRExporter::exportReplays(
         replay.platformer = isPlatformer;
         replay.levelInfo = gdr::Level(effectiveLevelName, validLevelID);
 
-        uint64_t maxTick = 0;
+        uint64_t maxTick = std::max(static_cast<uint64_t>(completionTick), actions.empty() ? 0ULL : static_cast<uint64_t>(actions.back().tick));
         for (const auto& act : actions) {
             replay.inputs.emplace_back(act.tick, 1, false, act.pressed);
             if (act.tick > maxTick) {
@@ -167,7 +168,7 @@ ExportResult GDRExporter::exportReplays(
         root["author"] = "LevelSolver";
         root["description"] = "Solved by LevelSolver Autonomous AI";
         
-        uint64_t maxTick = 0;
+        uint64_t maxTick = std::max(static_cast<uint64_t>(completionTick), actions.empty() ? 0ULL : static_cast<uint64_t>(actions.back().tick));
         for (const auto& act : actions) {
             if (act.tick > maxTick) maxTick = act.tick;
         }

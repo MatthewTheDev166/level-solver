@@ -21,6 +21,7 @@ void MacroManager::clear() {
     m_playbackTick = 0;
     m_playbackIndex = 0;
     m_totalTicks = 0;
+    m_completionTick = 0;
     m_state = ReplayState::Idle;
     m_lastButtonState = false;
     m_isDispatchingInput = false;
@@ -30,6 +31,13 @@ void MacroManager::clear() {
     m_desyncTick = 0;
     m_armedLevelID = 0;
     m_armedLevelName.clear();
+}
+
+void MacroManager::setCompletionTick(uint32_t tick) {
+    m_completionTick = tick;
+    if (m_completionTick > m_totalTicks) {
+        m_totalTicks = m_completionTick;
+    }
 }
 
 void MacroManager::setActions(const std::vector<TickAction>& actions) {
@@ -56,7 +64,7 @@ void MacroManager::setActions(const std::vector<TickAction>& actions) {
         }
     }
     m_actions = clean;
-    m_totalTicks = m_actions.empty() ? 0 : m_actions.back().tick;
+    m_totalTicks = std::max(m_completionTick, m_actions.empty() ? 0u : m_actions.back().tick);
 }
 
 const std::vector<TickAction>& MacroManager::getActions() const {
@@ -111,6 +119,8 @@ bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
 
         root["inputs"] = inputArray;
         root["trajectory"] = trajArray;
+        root["completionTick"] = static_cast<double>(m_completionTick);
+        root["totalTicks"] = static_cast<double>(m_totalTicks);
 
         std::ofstream file(filePath);
         if (!file.is_open()) {
@@ -176,7 +186,11 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                             for (const auto& inp : replay.inputs) {
                                 loaded.push_back({ static_cast<uint32_t>(inp.frame), inp.down });
                             }
+                            m_completionTick = static_cast<uint32_t>(replay.duration * 240.0f);
                             setActions(loaded);
+                            if (m_completionTick > m_totalTicks) {
+                                m_totalTicks = m_completionTick;
+                            }
                             m_trajectorySamples.clear();
                             geode::log::info("[LevelSolver] Loaded {} inputs from binary GDR file: {}",
                                 m_actions.size(), cand.string());
@@ -197,7 +211,11 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                                 for (const auto& inp : replay.inputs) {
                                     loaded.push_back({ static_cast<uint32_t>(inp.frame), inp.down });
                                 }
+                                m_completionTick = static_cast<uint32_t>(replay.duration * 240.0f);
                                 setActions(loaded);
+                                if (m_completionTick > m_totalTicks) {
+                                    m_totalTicks = m_completionTick;
+                                }
                                 m_trajectorySamples.clear();
                                 geode::log::info("[LevelSolver] Loaded {} inputs from binary GDR file: {}",
                                     m_actions.size(), cand.string());
@@ -230,6 +248,13 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
         std::vector<TrajectorySample> loadedTraj;
 
         if (rootVal.isObject()) {
+            if (rootVal.contains("completionTick")) {
+                m_completionTick = static_cast<uint32_t>(rootVal["completionTick"].asDouble().unwrapOr(0.0));
+            } else if (rootVal.contains("totalTicks")) {
+                m_completionTick = static_cast<uint32_t>(rootVal["totalTicks"].asDouble().unwrapOr(0.0));
+            } else if (rootVal.contains("duration")) {
+                m_completionTick = static_cast<uint32_t>(rootVal["duration"].asDouble().unwrapOr(0.0) * 240.0);
+            }
             if (rootVal.contains("inputs") && rootVal["inputs"].isArray()) {
                 for (const auto& item : rootVal["inputs"].asArray().unwrap()) {
                     TickAction act;
@@ -261,6 +286,9 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
         }
 
         setActions(loaded);
+        if (m_completionTick > m_totalTicks) {
+            m_totalTicks = m_completionTick;
+        }
         m_trajectorySamples = loadedTraj;
         geode::log::info("[LevelSolver] Loaded {} inputs (and {} trajectory points) from {}",
             m_actions.size(), m_trajectorySamples.size(), filePath.string());
@@ -449,7 +477,20 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
     m_playbackTick++;
 
     if (m_playbackIndex >= m_actions.size()) {
-        if (!m_lastButtonState || m_playbackTick > m_totalTicks + 60) {
+        if (m_lastButtonState && m_playbackTick > m_totalTicks + 60) {
+            m_isDispatchingInput = true;
+            playLayer->handleButton(false, 1, true);
+            if (playLayer->m_player1) {
+                playLayer->m_player1->releaseButton(PlayerButton::Jump);
+            }
+            if (playLayer->m_player2) {
+                playLayer->m_player2->releaseButton(PlayerButton::Jump);
+            }
+            m_isDispatchingInput = false;
+            m_lastButtonState = false;
+        }
+
+        if (m_playbackTick >= m_totalTicks) {
             if (m_lastButtonState) {
                 m_isDispatchingInput = true;
                 playLayer->handleButton(false, 1, true);
@@ -464,7 +505,7 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
             }
             if (m_state != ReplayState::Finished) {
                 m_state = ReplayState::Finished;
-                geode::log::info("[LevelSolver] Macro replay completed all inputs at tick {}", m_playbackTick);
+                geode::log::info("[LevelSolver] Macro replay completed all inputs and reached level end at tick {}", m_playbackTick);
             }
         }
     }

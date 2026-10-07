@@ -7,7 +7,7 @@ namespace solver {
 bool HazardDetector::isHazardObject(GameObject* obj) {
     if (!obj) return false;
     auto type = obj->m_objectType;
-    if (type == GameObjectType::Hazard || type == GameObjectType::AnimatedHazard) {
+    if (type == GameObjectType::Hazard || type == GameObjectType::AnimatedHazard || type == GameObjectType::Solid) {
         return true;
     }
     if (obj->m_slopeIsHazard) {

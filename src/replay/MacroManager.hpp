@@ -49,6 +49,9 @@ public:
     bool hasDesync() const { return m_hasDesync; }
     uint32_t getDesyncTick() const { return m_desyncTick; }
 
+    void setCompletionTick(uint32_t tick);
+    uint32_t getCompletionTick() const { return m_completionTick; }
+
     uint32_t getCurrentPlaybackTick() const;
     size_t getCurrentActionIndex() const;
     size_t getTotalActions() const;
@@ -72,6 +75,7 @@ private:
     uint32_t m_playbackTick = 0;
     size_t m_playbackIndex = 0;
     uint32_t m_totalTicks = 0;
+    uint32_t m_completionTick = 0;
     bool m_lastButtonState = false;
     bool m_isDispatchingInput = false;
     bool m_replaySessionActive = false;

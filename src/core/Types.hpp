@@ -228,6 +228,7 @@ struct SwarmBot {
     float fitnessScore = 0.0f;
     VehicleMode endMode = VehicleMode::Cube;
     bool endIsHolding = false;
+    uint32_t completionTick = 0;
 
     // Trajectory Time-Rollback Backtracking metadata
     bool touchedGround = false;

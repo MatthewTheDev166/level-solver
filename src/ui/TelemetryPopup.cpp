@@ -64,7 +64,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
     m_level = level;
     m_previousPlayLayer = GameManager::sharedState() ? GameManager::sharedState()->m_playLayer : nullptr;
-    std::string verStr = "v1.6.0";
+    std::string verStr = "v1.6.1";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel

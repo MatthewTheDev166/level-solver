@@ -22,6 +22,7 @@ public:
         const std::string& levelName,
         int levelID,
         const std::vector<TickAction>& actions,
+        uint32_t completionTick = 0,
         bool isPlatformer = false
     );
 
