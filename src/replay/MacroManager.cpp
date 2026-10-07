@@ -121,6 +121,7 @@ bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
         root["trajectory"] = trajArray;
         root["completionTick"] = static_cast<double>(m_completionTick);
         root["totalTicks"] = static_cast<double>(m_totalTicks);
+        root["duration"] = (m_totalTicks > 0) ? (static_cast<double>(m_totalTicks) / 240.0) : 1.0;
 
         std::ofstream file(filePath);
         if (!file.is_open()) {

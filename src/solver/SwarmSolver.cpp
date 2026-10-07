@@ -422,6 +422,7 @@ void SwarmSolver::simulateBot(
 
             if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
                 completed = true;
+                bot.completed = true;
                 bot.completionTick = step;
                 break;
             }
@@ -501,6 +502,7 @@ void SwarmSolver::simulateBot(
 
             if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
                 completed = true;
+                bot.completed = true;
                 bot.completionTick = currentCp.startTick + step;
                 break;
             }
@@ -595,7 +597,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (bot.finalX > m_maxReachedX) {
                 m_maxReachedX = bot.finalX;
             }
-            if (bot.fitnessScore >= 5000.0f || isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+            if (bot.completed || isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
                 // Winning bot! Append actions and finalize
                 std::vector<TickAction> fullMacro;
                 uint32_t botCompletionTick = (bot.completionTick > 0) ? bot.completionTick : m_currentTick;
@@ -680,6 +682,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 BeamCheckpoint nextCp;
                 nextCp.startTick = currentCp.startTick + m_currentHorizonTicks;
                 nextCp.startX = bestBot.finalX;
+                nextCp.hasPlayer2 = m_hasPlayer2;
                 nextCp.macroHistory = currentCp.macroHistory;
                 for (const auto& act : bestBot.segmentActions) {
                     nextCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
@@ -881,9 +884,13 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     }
 
     // 2. Full Verification Simulation run from tick 0 at spawn
-    DeterministicPRNG::clampSeed(DeterministicPRNG::STATIC_SEED);
+    DeterministicPRNG::clampSeed(m_rootSnapshot.rngSeed);
     playLayer->resetLevel();
     playLayer->startGame();
+    m_rootSnapshot.restore(playLayer->m_player1);
+    if (m_hasPlayer2 && playLayer->m_player2) {
+        m_rootSnapshot2.restore(playLayer->m_player2);
+    }
     playLayer->m_started = true;
     playLayer->m_inResetDelay = false;
     playLayer->m_playerDied = false;
@@ -902,7 +909,10 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     uint32_t maxVerificationSteps = std::max(completionTick + 240, distanceSteps);
 
     size_t macroIdx = 0;
-    bool lastButton = false;
+    bool lastButton = m_rootSnapshot.isHolding;
+    if (lastButton) playLayer->handleButton(true, 1, true);
+    else playLayer->handleButton(false, 1, true);
+
     bool verificationFailed = false;
     bool reachedTrueEnd = false;
     uint32_t verifiedCompletionTick = 0;
@@ -912,10 +922,6 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
             bool btn = compressed[macroIdx].pressed;
             if (btn != lastButton) {
                 playLayer->handleButton(btn, 1, true);
-                if (playLayer->m_player1) {
-                    if (btn) playLayer->m_player1->pushButton(PlayerButton::Jump);
-                    else playLayer->m_player1->releaseButton(PlayerButton::Jump);
-                }
                 lastButton = btn;
             }
             macroIdx++;
@@ -995,9 +1001,20 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     // 3. Commit verified solution
     m_isCompleted = true;
     m_isRunning = false;
-    m_resolvedMacro = compressed;
 
     uint32_t finalCompletionTick = (verifiedCompletionTick > 0) ? verifiedCompletionTick : completionTick;
+
+    // Trim any exploratory actions beyond the verified completion tick
+    if (finalCompletionTick > 0) {
+        compressed.erase(std::remove_if(compressed.begin(), compressed.end(),
+            [finalCompletionTick](const TickAction& a) { return a.tick > finalCompletionTick; }), compressed.end());
+        if (!compressed.empty() && compressed.back().pressed) {
+            compressed.push_back({ finalCompletionTick, false });
+        }
+    }
+
+    m_resolvedMacro = compressed;
+
     MacroManager::get().setCompletionTick(finalCompletionTick);
     MacroManager::get().setActions(m_resolvedMacro);
     MacroManager::get().setTrajectory(m_trajectorySamples);
