@@ -271,7 +271,10 @@ void TelemetryPopup::update(float dt) {
     // Macro / Replay status
     int levelID = m_level ? m_level->m_levelID.value() : 0;
     std::string levelName = m_level ? m_level->m_levelName : "";
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
+    bool isSolverCompletedForLevel = SwarmSolver::get().isCompleted() &&
+        (SwarmSolver::get().getLevelID() == levelID &&
+         (levelID > 0 || SwarmSolver::get().getLevelName() == levelName));
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || isSolverCompletedForLevel;
     if (m_macroStatusLabel) {
         if (hasSavedMacro) {
             m_macroStatusLabel->setString(telemetry.isVerified ? "Saved Replay: Available (100% Verified)" : "Saved Replay: Available (Ready to Replay)");
@@ -449,7 +452,10 @@ void TelemetryPopup::onStopSolver(cocos2d::CCObject* sender) {
 
     int levelID = m_level ? m_level->m_levelID.value() : 0;
     std::string levelName = m_level ? m_level->m_levelName : "";
-    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
+    bool isSolverCompletedForLevel = SwarmSolver::get().isCompleted() &&
+        (SwarmSolver::get().getLevelID() == levelID &&
+         (levelID > 0 || SwarmSolver::get().getLevelName() == levelName));
+    bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || isSolverCompletedForLevel;
     setButtonVisualState(m_startButton, true);
     setButtonVisualState(m_stopButton, false);
     setButtonVisualState(m_replayButton, hasSavedMacro);
@@ -461,7 +467,11 @@ void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (SwarmSolver::get().isCompleted()) {
+    bool isSolverCompletedForLevel = SwarmSolver::get().isCompleted() &&
+        (SwarmSolver::get().getLevelID() == levelID &&
+         (levelID > 0 || SwarmSolver::get().getLevelName() == levelName));
+
+    if (isSolverCompletedForLevel) {
         MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
         MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
         MacroManager::get().saveMacro(levelID, levelName);
@@ -507,7 +517,11 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     int levelID = m_level->m_levelID.value();
     std::string levelName = m_level->m_levelName;
 
-    if (SwarmSolver::get().isCompleted()) {
+    bool isSolverCompletedForLevel = SwarmSolver::get().isCompleted() &&
+        (SwarmSolver::get().getLevelID() == levelID &&
+         (levelID > 0 || SwarmSolver::get().getLevelName() == levelName));
+
+    if (isSolverCompletedForLevel) {
         MacroManager::get().setActions(SwarmSolver::get().getResolvedMacro());
         MacroManager::get().setTrajectory(SwarmSolver::get().getTrajectory());
         MacroManager::get().saveMacro(levelID, levelName);
@@ -536,11 +550,13 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         return;
     }
 
-    // Transition to gameplay scene to watch playback
-    auto scene = PlayLayer::scene(m_level, false, false);
-    CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(0.5f, scene));
-
+    // Cache level reference before closing popup
+    GJGameLevel* level = m_level;
     this->onClose(nullptr);
+
+    // Transition to gameplay scene to watch playback cleanly
+    auto scene = PlayLayer::scene(level, false, false);
+    cocos2d::CCDirector::sharedDirector()->replaceScene(cocos2d::CCTransitionFade::create(0.5f, scene));
 }
 
 } // namespace solver

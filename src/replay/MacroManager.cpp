@@ -198,12 +198,14 @@ bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
 }
 
 void MacroManager::armReplay(int levelID, const std::string& levelName) {
-    if (m_actions.empty()) {
+    if (m_armedLevelID != levelID || m_armedLevelName != levelName || m_actions.empty()) {
         if (!loadMacro(levelID, levelName)) {
-            geode::log::warn("[LevelSolver] Cannot arm replay: macro file not found for level {} ('{}')", levelID, levelName);
-            m_replaySessionActive = false;
-            m_state = ReplayState::Idle;
-            return;
+            if (m_actions.empty() && !hasMacro(levelID, levelName)) {
+                geode::log::warn("[LevelSolver] Cannot arm replay: macro file not found for level {} ('{}')", levelID, levelName);
+                m_replaySessionActive = false;
+                m_state = ReplayState::Idle;
+                return;
+            }
         }
     }
 

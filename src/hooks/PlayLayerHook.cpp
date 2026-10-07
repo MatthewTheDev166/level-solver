@@ -30,6 +30,9 @@ static void updateReplayBadge(PlayLayer* pl) {
         if (badge) {
             badge->removeFromParentAndCleanup(true);
         }
+        if (auto oldBadge = static_cast<cocos2d::CCLabelBMFont*>(pl->getChildByTag(108492))) {
+            oldBadge->removeFromParentAndCleanup(true);
+        }
         return;
     }
 
@@ -77,6 +80,8 @@ static void updateReplayBadge(PlayLayer* pl) {
 class $modify(SolverPlayerObject, PlayerObject) {
     static void onModify(auto& self) {
         (void)self.setHookPriority("PlayerObject::playerDestroyed", geode::Priority::First);
+        (void)self.setHookPriority("PlayerObject::pushButton", geode::Priority::First);
+        (void)self.setHookPriority("PlayerObject::releaseButton", geode::Priority::First);
     }
 
     void playerDestroyed(bool noEffects) {
@@ -89,12 +94,26 @@ class $modify(SolverPlayerObject, PlayerObject) {
         }
         PlayerObject::playerDestroyed(noEffects);
     }
+
+    void pushButton(PlayerButton button) {
+        if (solver::MacroManager::get().isReplaying() && !solver::MacroManager::get().isDispatchingInput()) {
+            return;
+        }
+        PlayerObject::pushButton(button);
+    }
+
+    void releaseButton(PlayerButton button) {
+        if (solver::MacroManager::get().isReplaying() && !solver::MacroManager::get().isDispatchingInput()) {
+            return;
+        }
+        PlayerObject::releaseButton(button);
+    }
 };
 
 class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
     void processCommands(float dt, bool isHalfTick, bool isLastTick) {
         if (!isHalfTick && solver::MacroManager::get().isPlaying()) {
-            if (auto pl = PlayLayer::get()) {
+            if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
                 if (!pl->m_inResetDelay && pl->m_started && !pl->m_playerDied && pl->m_player1 && !pl->m_player1->m_isDead) {
                     solver::MacroManager::get().stepReplay(pl);
                 }
@@ -112,7 +131,7 @@ class $modify(SolverBaseGameLayer, GJBaseGameLayer) {
 
     void update(float dt) {
         GJBaseGameLayer::update(dt);
-        if (auto pl = PlayLayer::get()) {
+        if (auto pl = typeinfo_cast<PlayLayer*>(this)) {
             updateReplayBadge(pl);
         }
     }
@@ -191,9 +210,15 @@ class $modify(SolverPlayLayer, PlayLayer) {
             } else {
                 solver::MacroManager::get().stopReplay(this);
             }
-        } else if (!solver::MacroManager::get().isReplaySessionActive()) {
-            // Normal play: ensure replay is completely disarmed and stopped
+        } else {
+            // Normal play: unconditionally ensure replay is completely disarmed and stopped
             solver::MacroManager::get().stopReplay(this);
+            if (solver::SwarmSolver::get().isRunning()) {
+                solver::SwarmSolver::get().stop();
+            }
+            if (solver::AStarSolver::get().isRunning()) {
+                solver::AStarSolver::get().stop();
+            }
         }
 
         updateReplayBadge(this);

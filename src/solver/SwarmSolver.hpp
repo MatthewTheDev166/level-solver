@@ -25,6 +25,8 @@ public:
     bool isCompleted() const;
     TelemetryMetrics getTelemetry() const;
     float getLevelLength() const { return m_levelLength; }
+    int getLevelID() const { return m_levelID; }
+    const std::string& getLevelName() const { return m_levelName; }
 
     const std::vector<TickAction>& getResolvedMacro() const;
     const std::vector<TrajectorySample>& getTrajectory() const;

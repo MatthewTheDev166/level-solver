@@ -31,30 +31,46 @@ std::string GDRExporter::sanitizeFilename(const std::string& name, int levelID) 
     return safe;
 }
 
-std::filesystem::path GDRExporter::getMegaHackReplaysDir() {
+std::vector<std::filesystem::path> GDRExporter::getAllReplayDirectories() {
+    std::vector<std::filesystem::path> dirs;
+    std::error_code ec;
+
     // 1. Check relative to Geometry Dash directory
     try {
-        auto gdDir = geode::dirs::getGameDir();
-        auto candidate = gdDir / "replays";
-        if (std::filesystem::exists(candidate)) {
-            return candidate;
+        auto gdDir = geode::dirs::getGameDir() / "replays";
+        std::filesystem::create_directories(gdDir, ec);
+        if (std::filesystem::exists(gdDir, ec)) {
+            dirs.push_back(gdDir);
         }
     } catch (...) {}
 
     // 2. Check standard Steam install path on Windows
     std::filesystem::path standardPath = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Geometry Dash\\replays";
-    if (std::filesystem::exists(standardPath)) {
-        return standardPath;
-    }
-
-    // 3. Fallback: create in GD game directory
     try {
-        auto fallback = geode::dirs::getGameDir() / "replays";
-        std::filesystem::create_directories(fallback);
-        return fallback;
+        if (std::filesystem::exists("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Geometry Dash", ec)) {
+            std::filesystem::create_directories(standardPath, ec);
+            bool alreadyAdded = false;
+            for (const auto& d : dirs) {
+                if (std::filesystem::equivalent(d, standardPath, ec)) {
+                    alreadyAdded = true;
+                    break;
+                }
+            }
+            if (!alreadyAdded && std::filesystem::exists(standardPath, ec)) {
+                dirs.push_back(standardPath);
+            }
+        }
     } catch (...) {}
 
-    return standardPath;
+    if (dirs.empty()) {
+        dirs.push_back(standardPath);
+    }
+    return dirs;
+}
+
+std::filesystem::path GDRExporter::getMegaHackReplaysDir() {
+    auto dirs = getAllReplayDirectories();
+    return dirs.empty() ? std::filesystem::path("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Geometry Dash\\replays") : dirs.front();
 }
 
 ExportResult GDRExporter::exportReplays(
@@ -101,30 +117,39 @@ ExportResult GDRExporter::exportReplays(
         auto exportBytes = replay.exportData();
         if (exportBytes.isOk()) {
             const auto& bytes = exportBytes.unwrap();
+            auto allDirs = getAllReplayDirectories();
 
-            // Save .gdr2
-            std::ofstream fGdr2(result.gdr2Path, std::ios::binary);
-            if (fGdr2.is_open()) {
-                fGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            }
+            for (const auto& dir : allDirs) {
+                std::error_code dirEc;
+                std::filesystem::create_directories(dir, dirEc);
 
-            // Save .gdr
-            std::ofstream fGdr(result.gdrPath, std::ios::binary);
-            if (fGdr.is_open()) {
-                fGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            }
+                // Save {safeName}-macro.gdr2
+                auto pathGdr2 = dir / fmt::format("{}-macro.gdr2", safeName);
+                std::ofstream fGdr2(pathGdr2, std::ios::binary);
+                if (fGdr2.is_open()) {
+                    fGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                }
 
-            // Also write plain {safeName}.gdr and {safeName}.gdr2 for maximum tool compatibility
-            auto plainGdr2 = replaysDir / fmt::format("{}.gdr2", safeName);
-            std::ofstream fPlainGdr2(plainGdr2, std::ios::binary);
-            if (fPlainGdr2.is_open()) {
-                fPlainGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            }
+                // Save {safeName}-macro.gdr
+                auto pathGdr = dir / fmt::format("{}-macro.gdr", safeName);
+                std::ofstream fGdr(pathGdr, std::ios::binary);
+                if (fGdr.is_open()) {
+                    fGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                }
 
-            auto plainGdr = replaysDir / fmt::format("{}.gdr", safeName);
-            std::ofstream fPlainGdr(plainGdr, std::ios::binary);
-            if (fPlainGdr.is_open()) {
-                fPlainGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                // Save plain {safeName}.gdr2
+                auto plainGdr2 = dir / fmt::format("{}.gdr2", safeName);
+                std::ofstream fPlainGdr2(plainGdr2, std::ios::binary);
+                if (fPlainGdr2.is_open()) {
+                    fPlainGdr2.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                }
+
+                // Save plain {safeName}.gdr
+                auto plainGdr = dir / fmt::format("{}.gdr", safeName);
+                std::ofstream fPlainGdr(plainGdr, std::ios::binary);
+                if (fPlainGdr.is_open()) {
+                    fPlainGdr.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                }
             }
 
             geode::log::info("[LevelSolver] Successfully exported native GDR2/GDR macros to: {} and {}",
@@ -176,20 +201,27 @@ ExportResult GDRExporter::exportReplays(
         root["inputs"] = inputsArr;
 
         std::string jsonDump = root.dump(matjson::NO_INDENTATION);
+        auto allDirs = getAllReplayDirectories();
 
-        std::ofstream jsonFile(result.jsonPath);
-        if (jsonFile.is_open()) {
-            jsonFile << jsonDump;
-            jsonFile.close();
-            geode::log::info("[LevelSolver] Successfully exported GDR JSON macro to: {}", result.jsonPath.string());
-        }
+        for (const auto& dir : allDirs) {
+            std::error_code dirEc;
+            std::filesystem::create_directories(dir, dirEc);
 
-        auto plainJson = replaysDir / fmt::format("{}.json", safeName);
-        std::ofstream plainJsonFile(plainJson);
-        if (plainJsonFile.is_open()) {
-            plainJsonFile << jsonDump;
-            plainJsonFile.close();
+            auto jsonFileP = dir / fmt::format("{}-macro.json", safeName);
+            std::ofstream jsonFile(jsonFileP);
+            if (jsonFile.is_open()) {
+                jsonFile << jsonDump;
+                jsonFile.close();
+            }
+
+            auto plainJson = dir / fmt::format("{}.json", safeName);
+            std::ofstream plainJsonFile(plainJson);
+            if (plainJsonFile.is_open()) {
+                plainJsonFile << jsonDump;
+                plainJsonFile.close();
+            }
         }
+        geode::log::info("[LevelSolver] Successfully exported GDR JSON macro to: {}", result.jsonPath.string());
     } catch (const std::exception& e) {
         geode::log::error("[LevelSolver] Exception exporting GDR JSON macro: {}", e.what());
     }

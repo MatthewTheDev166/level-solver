@@ -28,6 +28,9 @@ public:
     /// @brief Get the Mega Hack replays directory path
     static std::filesystem::path getMegaHackReplaysDir();
 
+    /// @brief Get all valid replays directories across standard and game installations
+    static std::vector<std::filesystem::path> getAllReplayDirectories();
+
     /// @brief Sanitize a level name for safe filesystem usage
     static std::string sanitizeFilename(const std::string& name, int levelID);
 };
