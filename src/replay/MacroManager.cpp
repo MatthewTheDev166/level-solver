@@ -156,7 +156,7 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                 for (const auto& suffix : { "-macro.gdr2", ".gdr2", "-macro.gdr", ".gdr" }) {
                     auto cand = dir / (safeName + suffix);
                     if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
-                        auto res = gdr::Replay::importData(cand);
+                        auto res = gdr::Replay<>::importData(cand);
                         if (res.isOk()) {
                             const auto& replay = res.unwrap();
                             std::vector<TickAction> loaded;

@@ -442,9 +442,11 @@ void SwarmSolver::simulateBot(
             bot.fitnessScore = 10000.0f;
         } else {
             float progress = bot.finalX - m_frontierX;
-            float clearance = HazardDetector::calculateHazardClearance(
+            size_t nearbyObstacles = 0;
+            float clearance = HazardDetector::calculateClearance(
                 playLayer->m_player1->getPosition(),
-                playLayer->m_player1->m_vehicleSize
+                playLayer->m_objects,
+                nearbyObstacles
             );
             bot.fitnessScore = progress * 10.0f + clearance;
         }
@@ -516,9 +518,11 @@ void SwarmSolver::simulateBot(
             bot.fitnessScore = 10000.0f;
         } else {
             float progress = bot.finalX - currentCp.startX;
-            float clearance = HazardDetector::calculateHazardClearance(
+            size_t nearbyObstacles = 0;
+            float clearance = HazardDetector::calculateClearance(
                 playLayer->m_player1->getPosition(),
-                playLayer->m_player1->m_vehicleSize
+                playLayer->m_objects,
+                nearbyObstacles
             );
             bot.fitnessScore = progress * 10.0f + clearance;
         }
@@ -735,7 +739,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
     m_telemetry.frontierSize = (m_solverMode == SolverMode::SpawnRespawn) ? (m_frontierTick / 60) : m_checkpointStack.size();
     m_telemetry.activeWave = m_activeWaveIndex;
     m_telemetry.waveAttempt = (m_waveRetryCount % 10) + 1;
-    m_telemetry.ticksPerSecond = HeadlessEngine::get().getEstimatedTicksPerSecond();
+    m_telemetry.ticksPerSecond = HeadlessEngine::get().getTicksPerSecond();
 }
 
 void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions) {
