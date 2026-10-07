@@ -209,6 +209,13 @@ void MacroManager::armReplay(int levelID, const std::string& levelName) {
         }
     }
 
+    if (m_actions.empty()) {
+        geode::log::warn("[LevelSolver] Cannot arm replay: macro has 0 inputs for level {} ('{}')", levelID, levelName);
+        m_replaySessionActive = false;
+        m_state = ReplayState::Idle;
+        return;
+    }
+
     m_armedLevelID = levelID;
     m_armedLevelName = levelName;
     m_playbackTick = 0;
@@ -302,6 +309,9 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
             playLayer->handleButton(act.pressed, 1, true);
             m_isDispatchingInput = false;
             m_lastButtonState = act.pressed;
+            geode::log::info("[LevelSolver] Replay dispatch tick {}: {} at X={:.1f}, Y={:.1f}",
+                m_playbackTick, act.pressed ? "PRESS" : "RELEASE",
+                playLayer->m_player1->getPositionX(), playLayer->m_player1->getPositionY());
         }
     }
 

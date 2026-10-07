@@ -242,6 +242,17 @@ struct SwarmBot {
     bool survived = false;
     float clearance = 100.0f;
     float fitnessScore = 0.0f;
+
+    // Trajectory Time-Rollback Backtracking metadata
+    bool touchedGround = false;
+    uint32_t lastGroundedStep = 0;
+    float lastGroundedX = 0.0f;
+    bool touchedPad = false;
+    uint32_t padTouchStep = 0;
+    float padTouchX = 0.0f;
+    uint32_t firstAirStep = 0;
+    bool tookAirLaunch = false;
+    uint32_t landingStep = 0;
 };
 
 struct BeamCheckpoint {
@@ -251,6 +262,7 @@ struct BeamCheckpoint {
     bool hasPlayer2 = false;
     uint32_t startTick = 0;                       // Starting tick of this checkpoint
     float startX = 0.0f;                          // X coordinate at segment start
+    bool isGrounded = true;                       // True if this checkpoint is physically anchored on ground
     std::vector<TickAction> macroHistory;         // Global inputs accumulated to this point
     std::vector<SwarmBot> runnerUps;              // Top alternate surviving paths
     uint32_t runnerUpIndex = 0;                   // Currently tested alternate branch
@@ -279,6 +291,7 @@ struct BeamCheckpoint {
             hasPlayer2 = other.hasPlayer2;
             startTick = other.startTick;
             startX = other.startX;
+            isGrounded = other.isGrounded;
             macroHistory = other.macroHistory;
             runnerUps = other.runnerUps;
             runnerUpIndex = other.runnerUpIndex;
@@ -301,6 +314,7 @@ struct BeamCheckpoint {
             hasPlayer2 = other.hasPlayer2;
             startTick = other.startTick;
             startX = other.startX;
+            isGrounded = other.isGrounded;
             macroHistory = std::move(other.macroHistory);
             runnerUps = std::move(other.runnerUps);
             runnerUpIndex = other.runnerUpIndex;

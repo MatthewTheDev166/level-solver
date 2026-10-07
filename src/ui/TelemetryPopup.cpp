@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.5.4";
+    std::string verStr = "v1.5.5";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -483,6 +483,10 @@ void TelemetryPopup::onExportMacro(cocos2d::CCObject* sender) {
     }
 
     const auto& actions = MacroManager::get().getActions();
+    if (actions.empty()) {
+        FLAlertLayer::create("Empty Macro", "Macro has 0 inputs. Solve the level first or re-run the solver.", "OK")->show();
+        return;
+    }
     auto exportRes = GDRExporter::exportReplays(levelName, levelID, actions, m_level->isPlatformer());
     std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
 
@@ -529,6 +533,12 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
         MacroManager::get().loadMacro(levelID, levelName);
     } else {
         FLAlertLayer::create("No Macro", "No solved macro found for this level.", "OK")->show();
+        return;
+    }
+
+    const auto& actions = MacroManager::get().getActions();
+    if (actions.empty()) {
+        FLAlertLayer::create("Empty Macro", "Macro has 0 inputs. Solve the level first or re-run the solver.", "OK")->show();
         return;
     }
 

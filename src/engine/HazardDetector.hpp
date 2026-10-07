@@ -19,6 +19,7 @@ public:
     static bool isHazardObject(GameObject* obj);
     static bool isInteractableOrbOrPad(GameObject* obj);
     static bool isOrb(GameObject* obj);
+    static bool isPad(GameObject* obj);
     static bool isDashOrb(GameObject* obj);
 
     static bool hasHazards();

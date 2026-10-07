@@ -42,6 +42,21 @@ bool HazardDetector::isInteractableOrbOrPad(GameObject* obj) {
     }
 }
 
+bool HazardDetector::isPad(GameObject* obj) {
+    if (!obj) return false;
+    auto type = obj->m_objectType;
+    switch (type) {
+        case GameObjectType::YellowJumpPad:
+        case GameObjectType::PinkJumpPad:
+        case GameObjectType::GravityPad:
+        case GameObjectType::RedJumpPad:
+        case GameObjectType::SpiderPad:
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool HazardDetector::isDashOrb(GameObject* obj) {
     if (!obj) return false;
     auto type = obj->m_objectType;

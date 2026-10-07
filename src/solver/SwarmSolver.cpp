@@ -12,28 +12,20 @@ namespace solver {
 
 static bool isSimulationFinished(PlayLayer* playLayer, float levelLength, float startX, float lastHazardX = 0.0f) {
     if (!playLayer || !playLayer->m_player1) return false;
+
+    // A dead or crashed player can NEVER be considered finished!
+    if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
+        return false;
+    }
+
     if (playLayer->m_hasCompletedLevel) {
         return true;
     }
 
-    // GD 2.2 percent check: >= 99% is essentially complete
-    if (playLayer->getCurrentPercent() >= 99.0f) {
-        return true;
-    }
-
     float currentX = playLayer->m_player1->getPositionX();
-    if (levelLength > startX + 50.0f) {
-        if (currentX >= (levelLength - 15.0f)) return true;
-    } else {
-        if (currentX >= levelLength) return true;
-    }
-
-    // Past all hazards and in final stretch (>= 88% of total level distance)
-    float totalDist = levelLength - startX;
-    if (lastHazardX > startX + 30.0f && currentX >= lastHazardX + 15.0f && totalDist > 50.0f && currentX >= startX + 0.88f * totalDist) {
-        if (!HazardDetector::isNearAnyObject(currentX, 60.0f)) {
-            return true;
-        }
+    bool pastHazards = (lastHazardX <= startX + 10.0f) || (currentX > lastHazardX + 50.0f);
+    if (currentX >= levelLength && pastHazards) {
+        return true;
     }
 
     return false;
@@ -91,9 +83,13 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     if (robtopEndX > m_startX + 50.0f) {
         m_levelLength = robtopEndX;
     } else if (maxObjX > m_startX + 50.0f) {
-        m_levelLength = maxObjX;
+        m_levelLength = maxObjX + 60.0f;
     } else {
         m_levelLength = m_startX + 600.0f; // Blank level fallback
+    }
+
+    if (m_lastHazardX + 60.0f > m_levelLength) {
+        m_levelLength = m_lastHazardX + 60.0f;
     }
 
     geode::log::info("[LevelSolver] Level bounds: startX={:.1f}, levelLength={:.1f}, lastHazardX={:.1f}",
@@ -315,7 +311,48 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                         }
                     }
                 } else {
-                    // Jumping modes (Cube, Robot, Ball, Spider, etc.): takeoff earlier before the death point
+                    // Jumping modes (Cube, Robot, Ball, Spider, etc.):
+
+                    // If parent died after touching a jump pad: mutate takeoffs BEFORE the pad to bypass/hop over the pad!
+                    if (parent.touchedPad && parent.padTouchStep > 0) {
+                        uint32_t padStep = parent.padTouchStep;
+                        for (uint32_t lead : { 3u, 6u, 9u, 12u, 16u, 20u, 24u, 28u, 32u }) {
+                            if (padStep >= lead) {
+                                uint32_t prePadT = padStep - lead;
+                                for (uint32_t dur : { 4u, 8u, 14u, 24u, 36u, 48u }) {
+                                    std::vector<TickAction> acts;
+                                    acts.push_back({ prePadT, true });
+                                    if (prePadT + dur < horizonTicks) {
+                                        acts.push_back({ prePadT + dur, false });
+                                    }
+                                    addBotWithActions(acts);
+                                }
+                                addBotWithActions({ { prePadT, true } });
+                            }
+                        }
+                    }
+
+                    // If parent touched solid ground (e.g. stair) before death: mutate takeoffs anchored directly at the ground landing!
+                    if (parent.touchedGround && parent.lastGroundedStep > 0) {
+                        uint32_t gStep = parent.lastGroundedStep;
+                        for (int off = -3; off <= 3; ++off) {
+                            int jumpT = static_cast<int>(gStep) + off;
+                            if (jumpT >= 0 && jumpT < static_cast<int>(horizonTicks)) {
+                                uint32_t t = static_cast<uint32_t>(jumpT);
+                                for (uint32_t dur : { 6u, 12u, 20u, 32u, 48u }) {
+                                    std::vector<TickAction> acts = parent.segmentActions;
+                                    acts.erase(std::remove_if(acts.begin(), acts.end(), [t](const TickAction& a) { return a.tick >= t; }), acts.end());
+                                    acts.push_back({ t, true });
+                                    if (t + dur < horizonTicks) {
+                                        acts.push_back({ t + dur, false });
+                                    }
+                                    addBotWithActions(acts);
+                                }
+                            }
+                        }
+                    }
+
+                    // Standard takeoff mutations earlier before the collision point
                     for (uint32_t lead : { 2u, 4u, 6u, 8u, 10u, 12u, 14u, 16u, 18u, 20u, 22u, 24u, 28u, 32u, 36u }) {
                         if (localDeath >= lead) {
                             uint32_t earlyT = localDeath - lead;
@@ -441,6 +478,23 @@ std::vector<SwarmBot> SwarmSolver::generatePopulation(
                         acts.push_back({ t, true });
                         if (t + 6 < horizonTicks) acts.push_back({ t + 6, false });
                         addBotWithActions(acts);
+                    }
+                }
+            }
+
+            // Jump pads auto-trigger on contact: test takeoffs BEFORE pad to bypass or jump OVER the pad!
+            if (isJumpMode && HazardDetector::isPad(obj)) {
+                for (int preLead : { 6, 10, 14, 18, 22, 26, 30 }) {
+                    int prePadTick = orbTick - preLead;
+                    if (prePadTick >= 0 && prePadTick < static_cast<int>(horizonTicks)) {
+                        uint32_t t = static_cast<uint32_t>(prePadTick);
+                        for (uint32_t dur : { 8u, 16u, 28u, 44u }) {
+                            std::vector<TickAction> acts;
+                            acts.push_back({ t, true });
+                            if (t + dur < horizonTicks) acts.push_back({ t + dur, false });
+                            addBotWithActions(acts);
+                        }
+                        addBotWithActions({ { t, true } });
                     }
                 }
             }
@@ -662,6 +716,24 @@ void SwarmSolver::simulateBot(
 
         playLayer->update(HeadlessEngine::FIXED_DT);
 
+        // Track grounding and flight characteristics
+        bool onGround = playLayer->m_player1->m_isOnGround;
+        if (onGround) {
+            bot.touchedGround = true;
+            bot.lastGroundedStep = step;
+            bot.lastGroundedX = playLayer->m_player1->getPositionX();
+        } else {
+            if (!bot.tookAirLaunch && step > 0) {
+                bot.firstAirStep = step;
+            }
+        }
+        if (playLayer->m_player1->m_touchedPad && !bot.touchedPad) {
+            bot.touchedPad = true;
+            bot.padTouchStep = step;
+            bot.padTouchX = playLayer->m_player1->getPositionX();
+            bot.tookAirLaunch = true;
+        }
+
         // 1. Check level completion FIRST (before death / wall jam!)
         if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
             completed = true;
@@ -687,11 +759,8 @@ void SwarmSolver::simulateBot(
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
             // Check if player has reached the physical End Wall of the level
-            float totalDist = m_levelLength - m_startX;
-            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) ||
-                               (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f &&
-                                (currX >= m_startX + 0.85f * totalDist || !HazardDetector::isNearAnyObject(currX, 60.0f))) ||
-                               (playLayer->getCurrentPercent() >= 95.0f);
+            bool isPastHazards = (m_lastHazardX <= m_startX + 10.0f) || (currX > m_lastHazardX + 50.0f);
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) && isPastHazards;
 
             if (isAtEndWall) {
                 // Reached the physical End Wall of the level! Mark level completed!
@@ -720,8 +789,13 @@ void SwarmSolver::simulateBot(
     size_t nearbyCount = 0;
     float endClearance = HazardDetector::calculateClearance(playLayer->m_player1->getPosition(), playLayer->m_objects, nearbyCount);
 
-    // Forward Safety Validation: 15-tick forward probe for inescapable death traps
+    // Forward Safety Validation: probe for inescapable death traps & midair landing
     if (!completed) {
+        bool isJumpMode = (checkpoint.snapshot.mode == VehicleMode::Cube || 
+                           checkpoint.snapshot.mode == VehicleMode::Robot || 
+                           checkpoint.snapshot.mode == VehicleMode::Ball || 
+                           checkpoint.snapshot.mode == VehicleMode::Spider);
+
         PlayerSnapshot endSnap1;
         endSnap1.capture(playLayer->m_player1, checkpoint.startTick + horizonTicks, DeterministicPRNG::getCurrentSeed());
         PlayerSnapshot endSnap2;
@@ -729,7 +803,51 @@ void SwarmSolver::simulateBot(
             endSnap2.capture(playLayer->m_player2, checkpoint.startTick + horizonTicks, DeterministicPRNG::getCurrentSeed());
         }
 
-        // Probe 1: Idle (release)
+        // If in jump mode and airborne falling, test if bot can safely land on ground
+        if (isJumpMode && !playLayer->m_player1->m_isOnGround && playLayer->m_player1->m_yVelocity < 2.0) {
+            uint32_t airProbeTicks = 35;
+            bool airDied = false;
+            bool landed = false;
+            playLayer->handleButton(false, 1, true);
+            for (uint32_t ap = 0; ap < airProbeTicks; ++ap) {
+                playLayer->update(HeadlessEngine::FIXED_DT);
+                if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
+                    airDied = true;
+                    break;
+                }
+                if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+                    landed = true;
+                    break;
+                }
+                if (playLayer->m_player1->m_isOnGround) {
+                    landed = true;
+                    bot.landingStep = horizonTicks + ap + 1;
+                    break;
+                }
+            }
+
+            if (airDied || (!landed && !playLayer->m_player1->m_isOnGround)) {
+                // Airborne bot falls helplessly into a spike/wall or death pit!
+                bot.survived = false;
+                bot.deathTick = checkpoint.startTick + horizonTicks + 10;
+                bot.finalX = endX;
+                bot.clearance = 0.0f;
+                bot.fitnessScore = -500.0f;
+                playLayer->m_queuedButtons.clear();
+                playLayer->handleButton(false, 1, true);
+                return;
+            }
+
+            // Restore back to horizon boundary before standard probe
+            endSnap1.restore(playLayer->m_player1);
+            if (checkpoint.hasPlayer2 && playLayer->m_player2) endSnap2.restore(playLayer->m_player2);
+            playLayer->m_playerDied = false;
+            playLayer->m_player1->m_isDead = false;
+            if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+            playLayer->m_queuedButtons.clear();
+        }
+
+        // Standard 15-tick probe: Idle (release)
         playLayer->handleButton(false, 1, true);
         uint32_t idleDiedTicks = 15;
         for (uint32_t p = 0; p < 15; ++p) {
@@ -746,7 +864,6 @@ void SwarmSolver::simulateBot(
 
         // If idle died quickly (<= 10 ticks), test Hold (press) to check if jumping escapes the trap
         if (idleDiedTicks <= 10) {
-            // Restore back to horizon boundary
             endSnap1.restore(playLayer->m_player1);
             if (checkpoint.hasPlayer2 && playLayer->m_player2) {
                 endSnap2.restore(playLayer->m_player2);
@@ -1035,10 +1152,30 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                     break;
                 }
             }
+
+            // Checkpoint Ground Anchoring:
+            // In jump modes (Cube, Robot, Ball, Spider), never commit a checkpoint in midair falling toward hazards.
+            // If the bot is airborne at horizon boundary, roll forward until it lands on ground/block surface.
+            bool isJumpMode = (mode == VehicleMode::Cube || mode == VehicleMode::Robot || mode == VehicleMode::Ball || mode == VehicleMode::Spider);
+            uint32_t extraLandingTicks = 0;
+            const uint32_t MAX_ROLLFORWARD = 40;
+            if (!advanceDied && isJumpMode && !playLayer->m_player1->m_isOnGround && !playLayer->m_hasCompletedLevel) {
+                while (extraLandingTicks < MAX_ROLLFORWARD && !playLayer->m_player1->m_isOnGround) {
+                    extraLandingTicks++;
+                    playLayer->update(HeadlessEngine::FIXED_DT);
+                    if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
+                        advanceDied = true;
+                        break;
+                    }
+                    if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+                        break;
+                    }
+                }
+            }
             playLayer->m_queuedButtons.clear();
 
             if (advanceDied) {
-                geode::log::warn("[LevelSolver] Best bot died during checkpoint advance at tick {}! Discarding and retrying wave...",
+                geode::log::warn("[LevelSolver] Best bot died during checkpoint advance or ground landing roll-forward! Discarding and retrying wave...",
                     currentCp.startTick);
                 currentCp.failedWaves++;
                 m_activePopulation.clear();
@@ -1055,7 +1192,8 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
             // Commit winning bot into a new BeamCheckpoint (exact parity with simulateBot)
             BeamCheckpoint nextCp;
-            nextCp.startTick = currentCp.startTick + m_currentHorizonTicks;
+            nextCp.startTick = currentCp.startTick + m_currentHorizonTicks + extraLandingTicks;
+            nextCp.isGrounded = playLayer->m_player1->m_isOnGround;
             nextCp.macroHistory = currentCp.macroHistory;
             for (const auto& act : bestBot.segmentActions) {
                 nextCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
@@ -1087,8 +1225,8 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             m_partialProgressSeeds.clear();
             m_activePopulation.clear();
 
-            geode::log::info("[LevelSolver] Wave #{} passed (X={:.1f}, tick {}, {} survivors, best fitness={:.1f}) - New checkpoint set!",
-                m_activeWaveIndex, m_maxReachedX, m_currentTick, m_lastSurvivorCount, bestBot.fitnessScore);
+            geode::log::info("[LevelSolver] Wave #{} passed (X={:.1f}, tick {}, {} survivors, grounded={}, best fitness={:.1f}) - New checkpoint set!",
+                m_activeWaveIndex, m_maxReachedX, m_currentTick, m_lastSurvivorCount, m_checkpointStack.back().isGrounded, bestBot.fitnessScore);
         } else {
             // All bots died!
             m_waveRetryCount++;
@@ -1098,25 +1236,124 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             std::sort(m_activePopulation.begin(), m_activePopulation.end(), [](const SwarmBot& a, const SwarmBot& b) {
                 return a.finalX > b.finalX;
             });
-            m_partialProgressSeeds.clear();
-            for (size_t i = 0; i < m_activePopulation.size() && m_partialProgressSeeds.size() < 8; ++i) {
-                if (m_activePopulation[i].finalX > currentCp.startX + 5.0f) {
-                    m_partialProgressSeeds.push_back(m_activePopulation[i]);
+
+            // Trajectory Time-Rollback System:
+            // If the furthest bot made substantial progress past startX, touched solid ground (e.g. stair step) before death,
+            // and we've failed >= 2 waves, test setting a safe candidate checkpoint back in TIME at that grounded state!
+            bool timeRollbackAnchored = false;
+            if (!m_activePopulation.empty() && currentCp.failedWaves >= 2 && currentCp.failedWaves <= 5) {
+                const auto& leadBot = m_activePopulation.front();
+                if (leadBot.touchedGround && leadBot.lastGroundedStep > 12 && leadBot.lastGroundedX > currentCp.startX + 25.0f && !isNearBlacklistedTrap(leadBot.lastGroundedX, mode)) {
+                    if (currentCp.nativeCheckpoint) {
+                        playLayer->loadFromCheckpoint(currentCp.nativeCheckpoint);
+                    }
+                    currentCp.snapshot.restore(playLayer->m_player1);
+                    if (currentCp.hasPlayer2 && playLayer->m_player2) currentCp.snapshot2.restore(playLayer->m_player2);
+                    playLayer->m_started = true;
+                    playLayer->m_playerDied = false;
+                    playLayer->m_player1->m_isDead = false;
+                    playLayer->m_queuedButtons.clear();
+
+                    size_t aIdx = 0;
+                    bool btn = currentCp.snapshot.isHolding;
+                    bool lastB = btn;
+                    if (btn) playLayer->handleButton(true, 1, true);
+                    else playLayer->handleButton(false, 1, true);
+
+                    DeterministicPRNG::clampSeed(currentCp.snapshot.rngSeed);
+                    bool tbDied = false;
+                    for (uint32_t s = 0; s < leadBot.lastGroundedStep; ++s) {
+                        while (aIdx < leadBot.segmentActions.size() && leadBot.segmentActions[aIdx].tick <= s) {
+                            bool b = leadBot.segmentActions[aIdx].pressed;
+                            if (b != lastB) {
+                                playLayer->handleButton(b, 1, true);
+                                lastB = b;
+                            }
+                            aIdx++;
+                        }
+                        playLayer->update(HeadlessEngine::FIXED_DT);
+                        if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
+                            tbDied = true;
+                            break;
+                        }
+                    }
+
+                    if (!tbDied && playLayer->m_player1->m_isOnGround) {
+                        // Forward probe from candidate grounded stair to ensure safe landing
+                        PlayerSnapshot probeSnap;
+                        probeSnap.capture(playLayer->m_player1, currentCp.startTick + leadBot.lastGroundedStep, DeterministicPRNG::getCurrentSeed());
+                        playLayer->handleButton(false, 1, true);
+                        bool probeDied = false;
+                        for (uint32_t p = 0; p < 15; ++p) {
+                            playLayer->update(HeadlessEngine::FIXED_DT);
+                            if (playLayer->m_player1->m_isDead || playLayer->m_playerDied) {
+                                probeDied = true;
+                                break;
+                            }
+                        }
+                        probeSnap.restore(playLayer->m_player1);
+                        playLayer->m_playerDied = false;
+                        playLayer->m_player1->m_isDead = false;
+                        playLayer->m_queuedButtons.clear();
+
+                        if (!probeDied) {
+                            // Safe grounded landing on flight path! Anchor candidate checkpoint!
+                            BeamCheckpoint candCp;
+                            candCp.startTick = currentCp.startTick + leadBot.lastGroundedStep;
+                            candCp.startX = playLayer->m_player1->getPositionX();
+                            candCp.isGrounded = true;
+                            candCp.macroHistory = currentCp.macroHistory;
+                            for (const auto& act : leadBot.segmentActions) {
+                                if (act.tick <= leadBot.lastGroundedStep) {
+                                    candCp.macroHistory.push_back({ currentCp.startTick + act.tick, act.pressed });
+                                }
+                            }
+                            candCp.snapshot.capture(playLayer->m_player1, candCp.startTick, DeterministicPRNG::getCurrentSeed());
+                            bool isDual = playLayer->m_gameState.m_isDualMode && playLayer->m_player2 != nullptr;
+                            candCp.hasPlayer2 = isDual;
+                            if (isDual) candCp.snapshot2.capture(playLayer->m_player2, candCp.startTick, DeterministicPRNG::getCurrentSeed());
+                            playLayer->moveCameraToPos(playLayer->m_player1->getPosition());
+                            candCp.nativeCheckpoint = playLayer->createCheckpoint();
+                            if (candCp.nativeCheckpoint) candCp.nativeCheckpoint->retain();
+                            if (playLayer->m_checkpointArray && playLayer->m_checkpointArray->count() > 0) {
+                                playLayer->m_checkpointArray->removeAllObjects();
+                            }
+
+                            m_checkpointStack.push_back(std::move(candCp));
+                            m_currentTick = m_checkpointStack.back().startTick;
+                            m_maxReachedX = m_checkpointStack.back().startX;
+                            m_waveRetryCount = 0;
+                            m_partialProgressSeeds.clear();
+                            m_activePopulation.clear();
+                            timeRollbackAnchored = true;
+                            geode::log::info("[LevelSolver] Trajectory Time-Rollback: Anchored safe grounded checkpoint at X={:.1f} (tick {}) along leading flight path!",
+                                m_maxReachedX, m_currentTick);
+                        }
+                    }
                 }
             }
 
-            geode::log::warn("[LevelSolver] Wave #{} produced 0 survivors at X={:.1f} (failed {}/10 times, best reached X={:.1f})",
-                m_activeWaveIndex, currentCp.startX, currentCp.failedWaves,
-                m_activePopulation.empty() ? 0.0f : m_activePopulation.front().finalX);
-
-            if (currentCp.failedWaves >= 10) {
-                geode::log::warn("[LevelSolver] All 10 re-runs failed around X={:.1f}! Backtracking...", currentCp.startX);
-                if (m_checkpointStack.size() > 1) {
-                    blacklistTrap(currentCp.startX, currentCp.snapshot.mode);
+            if (!timeRollbackAnchored) {
+                m_partialProgressSeeds.clear();
+                for (size_t i = 0; i < m_activePopulation.size() && m_partialProgressSeeds.size() < 8; ++i) {
+                    if (m_activePopulation[i].finalX > currentCp.startX + 5.0f) {
+                        m_partialProgressSeeds.push_back(m_activePopulation[i]);
+                    }
                 }
-                handleBacktrack(playLayer);
-            } else {
-                m_activePopulation.clear();
+
+                geode::log::warn("[LevelSolver] Wave #{} produced 0 survivors at X={:.1f} (failed {}/10 times, best reached X={:.1f})",
+                    m_activeWaveIndex, currentCp.startX, currentCp.failedWaves,
+                    m_activePopulation.empty() ? 0.0f : m_activePopulation.front().finalX);
+
+                if (currentCp.failedWaves >= 10) {
+                    geode::log::warn("[LevelSolver] All 10 re-runs failed around X={:.1f}! Backtracking...", currentCp.startX);
+                    if (m_checkpointStack.size() > 1) {
+                        blacklistTrap(currentCp.startX, currentCp.snapshot.mode);
+                    }
+                    handleBacktrack(playLayer);
+                } else {
+                    m_activePopulation.clear();
+                }
             }
         }
     }
@@ -1339,9 +1576,27 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         }
         playLayer->m_queuedButtons.clear();
 
+        // Ground-anchor runner-up checkpoint for jump modes
+        bool isJumpMode = (parentMode == VehicleMode::Cube || parentMode == VehicleMode::Robot || parentMode == VehicleMode::Ball || parentMode == VehicleMode::Spider);
+        uint32_t runnerUpExtraTicks = 0;
+        bool runnerUpDied = false;
+        if (isJumpMode && !playLayer->m_player1->m_isOnGround && !playLayer->m_hasCompletedLevel) {
+            while (runnerUpExtraTicks < 40 && !playLayer->m_player1->m_isOnGround) {
+                runnerUpExtraTicks++;
+                playLayer->update(HeadlessEngine::FIXED_DT);
+                if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
+                    runnerUpDied = true;
+                    break;
+                }
+                if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) break;
+            }
+        }
+        if (runnerUpDied) continue;
+
         // Runner up committed as nextCp (exact parity, 100% synchronized)
         BeamCheckpoint nextCp;
-        nextCp.startTick = parentCp.startTick + m_currentHorizonTicks;
+        nextCp.startTick = parentCp.startTick + m_currentHorizonTicks + runnerUpExtraTicks;
+        nextCp.isGrounded = playLayer->m_player1->m_isOnGround;
         nextCp.macroHistory = parentCp.macroHistory;
         for (const auto& act : altBot.segmentActions) {
             nextCp.macroHistory.push_back({ parentCp.startTick + act.tick, act.pressed });
@@ -1424,6 +1679,24 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         compressed.push_back({ compressed.back().tick + 1, false });
     }
 
+    // Reject false solution with 0 jump inputs if the level contains hazards!
+    bool hasHazards = (m_lastHazardX > m_startX + 10.0f);
+    bool hasAnyJump = false;
+    for (const auto& act : compressed) {
+        if (act.pressed) {
+            hasAnyJump = true;
+            break;
+        }
+    }
+    if (hasHazards && !hasAnyJump) {
+        geode::log::warn("[LevelSolver] Rejected false solution with 0 jump inputs on level with hazards! Backtracking...");
+        m_activePopulation.clear();
+        m_currentWaveSurvivors.clear();
+        m_currentBotIndex = 0;
+        handleBacktrack(playLayer);
+        return;
+    }
+
     // 2. Verification simulation run from tick 0
     DeterministicPRNG::clampSeed();
     playLayer->resetLevel();
@@ -1501,11 +1774,8 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
         bool goingLeft = playLayer->m_player1->m_isGoingLeft;
         float dx = goingLeft ? (prevX - currX) : (currX - prevX);
         if (dx < 0.001f && !playLayer->m_player1->m_isDashing && !playLayer->m_player1->m_isSpider && !playLayer->m_hasCompletedLevel) {
-            float totalDist = m_levelLength - m_startX;
-            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) ||
-                               (m_lastHazardX > m_startX + 30.0f && currX >= m_lastHazardX + 10.0f &&
-                                (currX >= m_startX + 0.85f * totalDist || !HazardDetector::isNearAnyObject(currX, 60.0f))) ||
-                               (playLayer->getCurrentPercent() >= 95.0f);
+            bool isPastHazards = (m_lastHazardX <= m_startX + 10.0f) || (currX > m_lastHazardX + 50.0f);
+            bool isAtEndWall = (currX >= (m_levelLength - 15.0f)) && isPastHazards;
             if (isAtEndWall) {
                 // Reached end wall cleanly in verification!
                 break;
