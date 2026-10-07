@@ -66,6 +66,7 @@ private:
 
     // Check if a coordinate is near a blacklisted trap
     bool isNearBlacklistedTrap(float x, VehicleMode mode) const;
+    void blacklistTrap(float x, VehicleMode mode);
 
     bool m_isRunning = false;
     bool m_isCompleted = false;

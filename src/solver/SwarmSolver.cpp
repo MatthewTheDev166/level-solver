@@ -223,6 +223,13 @@ bool SwarmSolver::isNearBlacklistedTrap(float x, VehicleMode mode) const {
     return false;
 }
 
+void SwarmSolver::blacklistTrap(float x, VehicleMode mode) {
+    if (!isNearBlacklistedTrap(x, mode)) {
+        m_blacklistedTraps.push_back({ x, mode });
+        geode::log::warn("[LevelSolver] Blacklisted death trap at X={:.1f} (mode {})", x, static_cast<int>(mode));
+    }
+}
+
 std::vector<SwarmBot> SwarmSolver::generatePopulation(
     VehicleMode mode,
     uint32_t startTick,
@@ -724,21 +731,21 @@ void SwarmSolver::simulateBot(
 
         // Probe 1: Idle (release)
         playLayer->handleButton(false, 1, true);
-        uint32_t idleSurviveTicks = 15;
+        uint32_t idleDiedTicks = 15;
         for (uint32_t p = 0; p < 15; ++p) {
             playLayer->update(HeadlessEngine::FIXED_DT);
             if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
-                idleSurviveTicks = p;
+                idleDiedTicks = p + 1;
                 break;
             }
             if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
-                idleSurviveTicks = 15;
+                idleDiedTicks = 15;
                 break;
             }
         }
 
         // If idle died quickly (<= 10 ticks), test Hold (press) to check if jumping escapes the trap
-        if (idleSurviveTicks <= 10) {
+        if (idleDiedTicks <= 10) {
             // Restore back to horizon boundary
             endSnap1.restore(playLayer->m_player1);
             if (checkpoint.hasPlayer2 && playLayer->m_player2) {
@@ -751,23 +758,23 @@ void SwarmSolver::simulateBot(
 
             // Probe 2: Hold (press)
             playLayer->handleButton(true, 1, true);
-            uint32_t holdSurviveTicks = 15;
+            uint32_t holdDiedTicks = 15;
             for (uint32_t p = 0; p < 15; ++p) {
                 playLayer->update(HeadlessEngine::FIXED_DT);
                 if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
-                    holdSurviveTicks = p;
+                    holdDiedTicks = p + 1;
                     break;
                 }
                 if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
-                    holdSurviveTicks = 15;
+                    holdDiedTicks = 15;
                     break;
                 }
             }
 
             // If BOTH idle and hold die in <= 10 ticks, the bot is in an inescapable death trap!
-            if (holdSurviveTicks <= 10) {
+            if (holdDiedTicks <= 10) {
                 bot.survived = false;
-                bot.deathTick = checkpoint.startTick + horizonTicks + std::max(idleSurviveTicks, holdSurviveTicks);
+                bot.deathTick = checkpoint.startTick + horizonTicks + std::max(idleDiedTicks, holdDiedTicks);
                 bot.finalX = endX;
                 bot.clearance = 0.0f;
                 bot.fitnessScore = -500.0f;
@@ -786,6 +793,11 @@ void SwarmSolver::simulateBot(
         playLayer->m_player1->m_isDead = false;
         if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
         playLayer->m_queuedButtons.clear();
+        if (endSnap1.isHolding) {
+            playLayer->handleButton(true, 1, true);
+        } else {
+            playLayer->handleButton(false, 1, true);
+        }
     }
 
     // Bot survived the full segment alive and passed forward safety validation!
@@ -935,7 +947,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 m_currentBotIndex = 0;
                 if (currentCp.failedWaves >= 10) {
                     if (m_checkpointStack.size() > 1) {
-                        m_blacklistedTraps.push_back({ currentCp.startX, mode });
+                        blacklistTrap(currentCp.startX, mode);
                     }
                     handleBacktrack(playLayer);
                 }
@@ -994,6 +1006,9 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             playLayer->m_playerDied = false;
             playLayer->m_player1->m_isDead = false;
             if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+            playLayer->m_resumeTimer = 0;
+            playLayer->m_extraDelta = 0.0;
+            playLayer->m_isPaused = false;
             playLayer->m_hasCompletedLevel = false;
             playLayer->m_queuedButtons.clear();
 
@@ -1031,7 +1046,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 m_currentBotIndex = 0;
                 if (currentCp.failedWaves >= 10) {
                     if (m_checkpointStack.size() > 1) {
-                        m_blacklistedTraps.push_back({ currentCp.startX, mode });
+                        blacklistTrap(currentCp.startX, mode);
                     }
                     handleBacktrack(playLayer);
                 }
@@ -1097,7 +1112,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             if (currentCp.failedWaves >= 10) {
                 geode::log::warn("[LevelSolver] All 10 re-runs failed around X={:.1f}! Backtracking...", currentCp.startX);
                 if (m_checkpointStack.size() > 1) {
-                    m_blacklistedTraps.push_back({ currentCp.startX, currentCp.snapshot.mode });
+                    blacklistTrap(currentCp.startX, currentCp.snapshot.mode);
                 }
                 handleBacktrack(playLayer);
             } else {
@@ -1145,11 +1160,7 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
 
     // Blacklist the failed trap if not at root
     if (m_checkpointStack.size() > 1) {
-        float failedX = m_checkpointStack.back().startX;
-        VehicleMode failedMode = m_checkpointStack.back().snapshot.mode;
-        if (!isNearBlacklistedTrap(failedX, failedMode)) {
-            m_blacklistedTraps.push_back({ failedX, failedMode });
-        }
+        blacklistTrap(m_checkpointStack.back().startX, m_checkpointStack.back().snapshot.mode);
     }
 
     // Pop the failed checkpoint
@@ -1160,6 +1171,8 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     m_checkpointStack.pop_back();
 
     auto& parentCp = m_checkpointStack.back();
+    VehicleMode parentMode = parentCp.snapshot.mode;
+    m_currentHorizonTicks = (parentMode == VehicleMode::Wave) ? 36u : ((parentMode == VehicleMode::Ship || parentMode == VehicleMode::Swing || parentMode == VehicleMode::UFO) ? 48u : 60u);
 
     // Try alternate runner-up survivors from parent
     while (parentCp.runnerUpIndex < parentCp.runnerUps.size()) {
@@ -1182,6 +1195,9 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
         playLayer->m_playerDied = false;
         playLayer->m_player1->m_isDead = false;
         if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+        playLayer->m_resumeTimer = 0;
+        playLayer->m_extraDelta = 0.0;
+        playLayer->m_isPaused = false;
         playLayer->m_hasCompletedLevel = false;
         playLayer->m_queuedButtons.clear();
 
@@ -1229,20 +1245,20 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
 
             // Probe 1: Idle
             playLayer->handleButton(false, 1, true);
-            uint32_t idleP = 15;
+            uint32_t idleDiedTicks = 15;
             for (uint32_t p = 0; p < 15; ++p) {
                 playLayer->update(HeadlessEngine::FIXED_DT);
                 if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
-                    idleP = p;
+                    idleDiedTicks = p + 1;
                     break;
                 }
                 if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
-                    idleP = 15;
+                    idleDiedTicks = 15;
                     break;
                 }
             }
 
-            if (idleP <= 10) {
+            if (idleDiedTicks <= 10) {
                 snap1.restore(playLayer->m_player1);
                 if (parentCp.hasPlayer2 && playLayer->m_player2) snap2.restore(playLayer->m_player2);
                 playLayer->m_playerDied = false;
@@ -1252,35 +1268,78 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
 
                 // Probe 2: Hold
                 playLayer->handleButton(true, 1, true);
-                uint32_t holdP = 15;
+                uint32_t holdDiedTicks = 15;
                 for (uint32_t p = 0; p < 15; ++p) {
                     playLayer->update(HeadlessEngine::FIXED_DT);
                     if (playLayer->m_player1->m_isDead || (playLayer->m_player2 && playLayer->m_player2->m_isDead) || playLayer->m_playerDied) {
-                        holdP = p;
+                        holdDiedTicks = p + 1;
                         break;
                     }
                     if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
-                        holdP = 15;
+                        holdDiedTicks = 15;
                         break;
                     }
                 }
-                if (holdP <= 10) {
+                if (holdDiedTicks <= 10) {
                     trapProbe = true;
                 }
             }
-
-            // Restore state back to boundary
-            snap1.restore(playLayer->m_player1);
-            if (parentCp.hasPlayer2 && playLayer->m_player2) snap2.restore(playLayer->m_player2);
-            playLayer->m_playerDied = false;
-            playLayer->m_player1->m_isDead = false;
-            if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
-            playLayer->m_queuedButtons.clear();
         }
 
         if (trapProbe) continue;
 
-        // Runner up survived! Commit as nextCp (exact parity, no extraTicks)
+        // Check if runner-up finished the level!
+        if (playLayer->m_hasCompletedLevel || isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+            std::vector<TickAction> fullMacro = parentCp.macroHistory;
+            for (const auto& act : altBot.segmentActions) {
+                fullMacro.push_back({ parentCp.startTick + act.tick, act.pressed });
+            }
+            finalizeSolution(playLayer, fullMacro);
+            return;
+        }
+
+        // Runner up survived and passed forward safety!
+        // Re-advance cleanly from parentCp so that playLayer's level objects and triggers
+        // are perfectly synchronized at the boundary when creating the native checkpoint!
+        if (parentCp.nativeCheckpoint) {
+            playLayer->loadFromCheckpoint(parentCp.nativeCheckpoint);
+        }
+        parentCp.snapshot.restore(playLayer->m_player1);
+        if (parentCp.hasPlayer2 && playLayer->m_player2) {
+            parentCp.snapshot2.restore(playLayer->m_player2);
+        }
+        playLayer->m_started = true;
+        playLayer->m_inResetDelay = false;
+        playLayer->m_playerDied = false;
+        playLayer->m_player1->m_isDead = false;
+        if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+        playLayer->m_resumeTimer = 0;
+        playLayer->m_extraDelta = 0.0;
+        playLayer->m_isPaused = false;
+        playLayer->m_hasCompletedLevel = false;
+        playLayer->m_queuedButtons.clear();
+
+        aIdx = 0;
+        btn = parentCp.snapshot.isHolding;
+        lastB = btn;
+        if (btn) playLayer->handleButton(true, 1, true);
+        else playLayer->handleButton(false, 1, true);
+
+        DeterministicPRNG::clampSeed(parentCp.snapshot.rngSeed);
+        for (uint32_t s = 0; s < m_currentHorizonTicks; ++s) {
+            while (aIdx < altBot.segmentActions.size() && altBot.segmentActions[aIdx].tick <= s) {
+                bool b = altBot.segmentActions[aIdx].pressed;
+                if (b != lastB) {
+                    playLayer->handleButton(b, 1, true);
+                    lastB = b;
+                }
+                aIdx++;
+            }
+            playLayer->update(HeadlessEngine::FIXED_DT);
+        }
+        playLayer->m_queuedButtons.clear();
+
+        // Runner up committed as nextCp (exact parity, 100% synchronized)
         BeamCheckpoint nextCp;
         nextCp.startTick = parentCp.startTick + m_currentHorizonTicks;
         nextCp.macroHistory = parentCp.macroHistory;
@@ -1326,6 +1385,9 @@ void SwarmSolver::handleBacktrack(PlayLayer* playLayer) {
     playLayer->m_playerDied = false;
     playLayer->m_player1->m_isDead = false;
     if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+    playLayer->m_resumeTimer = 0;
+    playLayer->m_extraDelta = 0.0;
+    playLayer->m_isPaused = false;
     playLayer->m_hasCompletedLevel = false;
     playLayer->m_queuedButtons.clear();
 
