@@ -154,13 +154,13 @@ class $modify(SolverPlayLayer, PlayLayer) {
         if (solver::HeadlessEngine::get().isHeadless() || this->m_isSilent) {
             return;
         }
-        // If a new replay was armed for the upcoming scene, don't stop it!
-        if (solver::MacroManager::get().isArmed()) {
+        // If a replay session is active (either Armed or Playing), do NOT kill it in the destructor
+        // during scene transitions (e.g. replaceScene). It will be stopped cleanly by onQuit() when
+        // the user exits, or by init() if a non-matching level is loaded.
+        if (solver::MacroManager::get().isReplaySessionActive()) {
             return;
         }
-        if (solver::MacroManager::get().isReplaySessionActive()) {
-            solver::MacroManager::get().stopReplay(this);
-        }
+        solver::MacroManager::get().stopReplay(this);
     }
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {

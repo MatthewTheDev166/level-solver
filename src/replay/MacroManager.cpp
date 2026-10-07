@@ -141,7 +141,7 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
             bool foundCandidate = false;
 
             for (const auto& dir : replayDirs) {
-                // First try JSON macros
+                // First try JSON macros by safeName
                 for (const auto& suffix : { "-macro.json", ".json" }) {
                     auto cand = dir / (safeName + suffix);
                     if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
@@ -152,7 +152,20 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                 }
                 if (foundCandidate) break;
 
-                // Next try GDR2/GDR binary macros
+                // Try JSON macros by levelID
+                if (levelID > 0) {
+                    for (const auto& suffix : { "-macro.json", ".json" }) {
+                        auto cand = dir / fmt::format("{}{}", levelID, suffix);
+                        if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
+                            filePath = cand;
+                            foundCandidate = true;
+                            break;
+                        }
+                    }
+                    if (foundCandidate) break;
+                }
+
+                // Next try GDR2/GDR binary macros by safeName
                 for (const auto& suffix : { "-macro.gdr2", ".gdr2", "-macro.gdr", ".gdr" }) {
                     auto cand = dir / (safeName + suffix);
                     if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
@@ -168,6 +181,28 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                             geode::log::info("[LevelSolver] Loaded {} inputs from binary GDR file: {}",
                                 m_actions.size(), cand.string());
                             return true;
+                        }
+                    }
+                }
+
+                // Try GDR2/GDR binary macros by levelID
+                if (levelID > 0) {
+                    for (const auto& suffix : { "-macro.gdr2", ".gdr2", "-macro.gdr", ".gdr" }) {
+                        auto cand = dir / fmt::format("{}{}", levelID, suffix);
+                        if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
+                            auto res = gdr::Replay<>::importData(cand);
+                            if (res.isOk()) {
+                                const auto& replay = res.unwrap();
+                                std::vector<TickAction> loaded;
+                                for (const auto& inp : replay.inputs) {
+                                    loaded.push_back({ static_cast<uint32_t>(inp.frame), inp.down });
+                                }
+                                setActions(loaded);
+                                m_trajectorySamples.clear();
+                                geode::log::info("[LevelSolver] Loaded {} inputs from binary GDR file: {}",
+                                    m_actions.size(), cand.string());
+                                return true;
+                            }
                         }
                     }
                 }

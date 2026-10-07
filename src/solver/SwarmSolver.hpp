@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstdint>
 #include <string>
+#include <utility>
 
 namespace solver {
 
@@ -81,6 +82,7 @@ private:
     uint32_t m_frontierTick = 0;
     float m_frontierX = 0.0f;
     VehicleMode m_frontierMode = VehicleMode::Cube;
+    std::vector<std::pair<uint32_t, VehicleMode>> m_frontierModeHistory;
     std::vector<TickAction> m_verifiedPrefix;
     PlayerSnapshot m_rootSnapshot;
     PlayerSnapshot m_rootSnapshot2;

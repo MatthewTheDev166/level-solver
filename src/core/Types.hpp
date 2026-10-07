@@ -226,6 +226,8 @@ struct SwarmBot {
     bool survived = false;
     float clearance = 100.0f;
     float fitnessScore = 0.0f;
+    VehicleMode endMode = VehicleMode::Cube;
+    bool endIsHolding = false;
 
     // Trajectory Time-Rollback Backtracking metadata
     bool touchedGround = false;

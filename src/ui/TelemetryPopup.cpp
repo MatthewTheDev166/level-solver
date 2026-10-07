@@ -63,6 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
+    m_previousPlayLayer = GameManager::sharedState() ? GameManager::sharedState()->m_playLayer : nullptr;
     std::string verStr = "v1.6.0";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
@@ -221,10 +222,6 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
 
 
 void TelemetryPopup::update(float dt) {
-    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
-        eglView->showCursor(true);
-    }
-
     // If running in background, advance headless swarm batch
     if (SwarmSolver::get().isRunning() && m_headlessPlayLayer) {
         ActiveLayerScope scope(m_headlessPlayLayer);
@@ -237,6 +234,10 @@ void TelemetryPopup::update(float dt) {
         return;
     }
     m_uiUpdateTimer = 0.0f;
+
+    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
+        eglView->showCursor(true);
+    }
 
     auto telemetry = SwarmSolver::get().getTelemetry();
 

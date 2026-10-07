@@ -136,6 +136,8 @@ void SwarmSolver::start(PlayLayer* playLayer) {
     m_frontierTick = 0;
     m_frontierX = m_startX;
     m_frontierMode = m_rootSnapshot.mode;
+    m_frontierModeHistory.clear();
+    m_frontierModeHistory.push_back({ 0, m_frontierMode });
     m_verifiedPrefix.clear();
 
     if (m_solverMode == SolverMode::Checkpoints) {
@@ -215,6 +217,7 @@ void SwarmSolver::reset() {
     m_currentTick = 0;
     m_frontierTick = 0;
     m_frontierX = 0.0f;
+    m_frontierModeHistory.clear();
     m_activeWaveIndex = 0;
     m_waveRetryCount = 0;
     m_backtrackCount = 0;
@@ -367,6 +370,7 @@ void SwarmSolver::simulateBot(
         // --- Spawn-Respawn Mode: Deterministic execution from spawn (tick 0) ---
         DeterministicPRNG::clampSeed(m_rootSnapshot.rngSeed);
 
+        playLayer->resetLevel();
         m_rootSnapshot.restore(playLayer->m_player1);
         if (m_hasPlayer2 && playLayer->m_player2) {
             m_rootSnapshot2.restore(playLayer->m_player2);
@@ -437,6 +441,8 @@ void SwarmSolver::simulateBot(
         playLayer->m_queuedButtons.clear();
         bot.survived = true;
         bot.finalX = playLayer->m_player1->getPositionX();
+        bot.endMode = PlayerSnapshot::detectMode(playLayer->m_player1);
+        bot.endIsHolding = playLayer->m_player1->buttonDown(PlayerButton::Jump);
 
         if (completed) {
             bot.fitnessScore = 10000.0f;
@@ -513,6 +519,8 @@ void SwarmSolver::simulateBot(
         playLayer->m_queuedButtons.clear();
         bot.survived = true;
         bot.finalX = playLayer->m_player1->getPositionX();
+        bot.endMode = PlayerSnapshot::detectMode(playLayer->m_player1);
+        bot.endIsHolding = playLayer->m_player1->buttonDown(PlayerButton::Jump);
 
         if (completed) {
             bot.fitnessScore = 10000.0f;
@@ -549,6 +557,13 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
         uint32_t startTick = (m_solverMode == SolverMode::SpawnRespawn) ? m_frontierTick : m_checkpointStack.back().startTick;
         float startX = (m_solverMode == SolverMode::SpawnRespawn) ? m_frontierX : m_checkpointStack.back().startX;
 
+        bool startsHeld = false;
+        if (m_solverMode == SolverMode::SpawnRespawn) {
+            startsHeld = m_verifiedPrefix.empty() ? m_rootSnapshot.isHolding : m_verifiedPrefix.back().pressed;
+        } else {
+            startsHeld = m_checkpointStack.empty() ? m_rootSnapshot.isHolding : m_checkpointStack.back().snapshot.isHolding;
+        }
+
         m_activePopulation = generatePopulation(
             mode,
             startTick,
@@ -558,7 +573,7 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
             1.0f,
             startX,
             playLayer->m_objects,
-            false
+            startsHeld
         );
         m_currentBotIndex = 0;
         m_currentWaveSurvivors.clear();
@@ -642,6 +657,8 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 
                 m_frontierTick += m_currentHorizonTicks;
                 m_frontierX = bestBot.finalX;
+                m_frontierMode = bestBot.endMode;
+                m_frontierModeHistory.push_back({ m_frontierTick, m_frontierMode });
                 m_currentTick = m_frontierTick;
                 m_waveRetryCount = 0;
                 m_activePopulation.clear();
@@ -701,13 +718,19 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
                 m_verifiedPrefix.erase(std::remove_if(m_verifiedPrefix.begin(), m_verifiedPrefix.end(),
                     [newFrontier](const TickAction& a) { return a.tick >= newFrontier; }), m_verifiedPrefix.end());
 
+                // Restore frontier mode from history
+                while (!m_frontierModeHistory.empty() && m_frontierModeHistory.back().first > newFrontier) {
+                    m_frontierModeHistory.pop_back();
+                }
+                m_frontierMode = m_frontierModeHistory.empty() ? m_rootSnapshot.mode : m_frontierModeHistory.back().second;
+
                 m_currentTick = m_frontierTick;
                 m_activePopulation.clear();
                 m_currentWaveSurvivors.clear();
                 m_currentBotIndex = 0;
 
-                geode::log::warn("[LevelSolver] Wave #{} wipeout! Rewound frontier to tick {} (backtrack #{})",
-                    m_activeWaveIndex, m_frontierTick, m_backtrackCount);
+                geode::log::warn("[LevelSolver] Wave #{} wipeout! Rewound frontier to tick {} (backtrack #{}, mode={})",
+                    m_activeWaveIndex, m_frontierTick, m_backtrackCount, static_cast<int>(m_frontierMode));
             } else {
                 // Classic Checkpoint Stack mode: pop failed checkpoint if repeated failures
                 auto& currentCp = m_checkpointStack.back();
@@ -743,24 +766,162 @@ void SwarmSolver::stepSwarmBatch(PlayLayer* playLayer, uint32_t maxSteps) {
 }
 
 void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions) {
-    m_isCompleted = true;
-    m_isRunning = false;
-
-    // Clean and sort winning macro
-    MacroManager::get().setActions(winningActions);
-    m_resolvedMacro = MacroManager::get().getActions();
-
-    // Record trajectory sample
-    if (playLayer && playLayer->m_player1) {
-        m_trajectorySamples.push_back({
-            m_currentTick,
-            playLayer->m_player1->getPositionX(),
-            playLayer->m_player1->getPositionY()
-        });
-        MacroManager::get().setTrajectory(m_trajectorySamples);
+    if (!playLayer || !playLayer->m_player1) {
+        return;
     }
 
-    // Save macro locally and export to Mega Hack replays
+    // 1. Sort strictly by tick and deduplicate consecutive identical actions
+    std::vector<TickAction> compressed = winningActions;
+    std::sort(compressed.begin(), compressed.end(), [](const TickAction& a, const TickAction& b) {
+        if (a.tick == b.tick) return !a.pressed && b.pressed;
+        return a.tick < b.tick;
+    });
+
+    std::vector<TickAction> clean;
+    bool lastState = false;
+    for (const auto& act : compressed) {
+        if (clean.empty()) {
+            clean.push_back(act);
+            lastState = act.pressed;
+        } else if (act.pressed != lastState) {
+            clean.push_back(act);
+            lastState = act.pressed;
+        }
+    }
+    compressed = clean;
+
+    if (!compressed.empty() && compressed.back().pressed) {
+        compressed.push_back({ compressed.back().tick + 1, false });
+    }
+
+    // Reject false solution with 0 jump inputs if the level contains hazards!
+    bool hasHazards = (m_lastHazardX > m_startX + 10.0f);
+    bool hasAnyJump = false;
+    for (const auto& act : compressed) {
+        if (act.pressed) {
+            hasAnyJump = true;
+            break;
+        }
+    }
+    if (hasHazards && !hasAnyJump) {
+        geode::log::warn("[LevelSolver] Rejected false solution with 0 jump inputs on level with hazards! Backtracking...");
+        m_activePopulation.clear();
+        m_currentWaveSurvivors.clear();
+        m_currentBotIndex = 0;
+        if (m_solverMode == SolverMode::SpawnRespawn) {
+            const uint32_t rewindTicks = 35;
+            uint32_t newFrontier = (m_frontierTick > rewindTicks) ? (m_frontierTick - rewindTicks) : 0;
+            m_frontierTick = newFrontier;
+            m_verifiedPrefix.erase(std::remove_if(m_verifiedPrefix.begin(), m_verifiedPrefix.end(),
+                [newFrontier](const TickAction& a) { return a.tick >= newFrontier; }), m_verifiedPrefix.end());
+            while (!m_frontierModeHistory.empty() && m_frontierModeHistory.back().first > newFrontier) {
+                m_frontierModeHistory.pop_back();
+            }
+            m_frontierMode = m_frontierModeHistory.empty() ? m_rootSnapshot.mode : m_frontierModeHistory.back().second;
+            m_currentTick = m_frontierTick;
+        }
+        return;
+    }
+
+    // 2. Full Verification Simulation run from tick 0 at spawn
+    DeterministicPRNG::clampSeed(DeterministicPRNG::STATIC_SEED);
+    playLayer->resetLevel();
+    playLayer->startGame();
+    playLayer->m_started = true;
+    playLayer->m_inResetDelay = false;
+    playLayer->m_playerDied = false;
+    playLayer->m_player1->m_isDead = false;
+    if (playLayer->m_player2) playLayer->m_player2->m_isDead = false;
+    playLayer->m_resumeTimer = 0;
+    playLayer->m_extraDelta = 0.0;
+    playLayer->m_isPaused = false;
+    playLayer->m_hasCompletedLevel = false;
+    playLayer->m_queuedButtons.clear();
+
+    m_trajectorySamples.clear();
+    uint32_t totalTicks = compressed.empty() ? 0 : compressed.back().tick;
+    uint32_t maxVerificationSteps = totalTicks + 120;
+    size_t macroIdx = 0;
+    bool lastButton = false;
+    bool verificationFailed = false;
+
+    for (uint32_t step = 0; step < maxVerificationSteps; ++step) {
+        while (macroIdx < compressed.size() && compressed[macroIdx].tick <= step) {
+            bool btn = compressed[macroIdx].pressed;
+            if (btn != lastButton) {
+                playLayer->handleButton(btn, 1, true);
+                if (playLayer->m_player1) {
+                    if (btn) playLayer->m_player1->pushButton(PlayerButton::Jump);
+                    else playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                }
+                lastButton = btn;
+            }
+            macroIdx++;
+        }
+
+        playLayer->update(HeadlessEngine::FIXED_DT);
+
+        // Record high-resolution trajectory points for HUD & desync detector
+        if (step % 15 == 0 || step == totalTicks) {
+            if (playLayer->m_player1) {
+                m_trajectorySamples.push_back({
+                    step,
+                    playLayer->m_player1->getPositionX(),
+                    playLayer->m_player1->getPositionY()
+                });
+            }
+        }
+
+        bool isDead = playLayer->m_player1->m_isDead ||
+                      (playLayer->m_player2 && playLayer->m_player2->m_isDead) ||
+                      playLayer->m_playerDied;
+        if (isDead) {
+            verificationFailed = true;
+            geode::log::warn("[LevelSolver] Verification simulation FAILED: Died at tick {} (X={:.1f})!",
+                step, playLayer->m_player1 ? playLayer->m_player1->getPositionX() : 0.0f);
+            break;
+        }
+
+        if (isSimulationFinished(playLayer, m_levelLength, m_startX, m_lastHazardX)) {
+            // Reached completion cleanly!
+            if (playLayer->m_player1) {
+                m_trajectorySamples.push_back({
+                    step,
+                    playLayer->m_player1->getPositionX(),
+                    playLayer->m_player1->getPositionY()
+                });
+            }
+            break;
+        }
+    }
+
+    if (verificationFailed) {
+        // Verification failed to survive the full run; rewind and keep exploring
+        m_activePopulation.clear();
+        m_currentWaveSurvivors.clear();
+        m_currentBotIndex = 0;
+        if (m_solverMode == SolverMode::SpawnRespawn) {
+            const uint32_t rewindTicks = 35;
+            uint32_t newFrontier = (m_frontierTick > rewindTicks) ? (m_frontierTick - rewindTicks) : 0;
+            m_frontierTick = newFrontier;
+            m_verifiedPrefix.erase(std::remove_if(m_verifiedPrefix.begin(), m_verifiedPrefix.end(),
+                [newFrontier](const TickAction& a) { return a.tick >= newFrontier; }), m_verifiedPrefix.end());
+            while (!m_frontierModeHistory.empty() && m_frontierModeHistory.back().first > newFrontier) {
+                m_frontierModeHistory.pop_back();
+            }
+            m_frontierMode = m_frontierModeHistory.empty() ? m_rootSnapshot.mode : m_frontierModeHistory.back().second;
+            m_currentTick = m_frontierTick;
+        }
+        return;
+    }
+
+    // 3. Commit verified solution
+    m_isCompleted = true;
+    m_isRunning = false;
+    m_resolvedMacro = compressed;
+
+    MacroManager::get().setActions(m_resolvedMacro);
+    MacroManager::get().setTrajectory(m_trajectorySamples);
     MacroManager::get().saveMacro(m_levelID, m_levelName);
     GDRExporter::exportReplays(m_levelName, m_levelID, m_resolvedMacro);
 
@@ -770,11 +931,11 @@ void SwarmSolver::finalizeSolution(PlayLayer* playLayer, const std::vector<TickA
     m_telemetry.status = SolverStatus::Solved;
     m_telemetry.explorationHorizon = 100.0f;
     m_telemetry.isVerified = true;
-    m_telemetry.detailMessage = fmt::format("Solved in {} waves! Macro saved with {} inputs.",
-        m_activeWaveIndex, m_resolvedMacro.size());
+    m_telemetry.detailMessage = fmt::format("Solved & 100% Verified in {} waves! Macro saved with {} inputs ({} trajectory samples).",
+        m_activeWaveIndex, m_resolvedMacro.size(), m_trajectorySamples.size());
 
-    geode::log::info("[LevelSolver] Level solved successfully in {} waves! {} inputs generated.",
-        m_activeWaveIndex, m_resolvedMacro.size());
+    geode::log::info("[LevelSolver] Level solved & 100% verified! {} inputs, {} trajectory checkpoints.",
+        m_resolvedMacro.size(), m_trajectorySamples.size());
 }
 
 bool SwarmSolver::isRunning() const {
