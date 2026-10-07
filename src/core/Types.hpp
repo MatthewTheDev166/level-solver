@@ -219,22 +219,6 @@ struct PlayerSnapshot {
     }
 };
 
-struct SearchNode {
-    PlayerSnapshot snapshot;
-    float gScore = 0.0f; // Traveled progress / cost
-    float fScore = 0.0f; // Priority heuristic score
-    float hazardClearance = 100.0f; // Distance to nearest hazard
-    uint32_t parentIndex = UINT32_MAX;
-    ActionType action = ActionType::None;
-    uint32_t actionSwitches = 0;
-    uint32_t holdDuration = 0;
-
-    bool operator<(const SearchNode& other) const {
-        // Max-priority queue: higher fScore has higher priority
-        return fScore < other.fScore;
-    }
-};
-
 struct SwarmBot {
     std::vector<TickAction> segmentActions; // Input timeline for this segment
     float finalX = 0.0f;
@@ -322,84 +306,6 @@ struct BeamCheckpoint {
         }
         return *this;
     }
-};
-
-struct ArenaNode {
-    int32_t parentIndex = -1;
-    uint32_t tick = 0;
-    bool buttonDown = false;
-};
-
-struct BeamNode {
-    CheckpointObject* checkpoint = nullptr;
-    PlayerSnapshot p1;
-    PlayerSnapshot p2;
-    bool hasP2 = false;
-    uint32_t tick = 0;
-    int32_t arenaIndex = -1;
-    bool buttonDown = false;
-    float clearance = 100.0f;
-    float x = 0.0f;
-    float y = 0.0f;
-
-    BeamNode() = default;
-
-    ~BeamNode() {
-        if (checkpoint) {
-            checkpoint->release();
-            checkpoint = nullptr;
-        }
-    }
-
-    BeamNode(const BeamNode& other) {
-        *this = other;
-    }
-
-    BeamNode& operator=(const BeamNode& other) {
-        if (this != &other) {
-            if (checkpoint) checkpoint->release();
-            checkpoint = other.checkpoint;
-            if (checkpoint) checkpoint->retain();
-            p1 = other.p1;
-            p2 = other.p2;
-            hasP2 = other.hasP2;
-            tick = other.tick;
-            arenaIndex = other.arenaIndex;
-            buttonDown = other.buttonDown;
-            clearance = other.clearance;
-            x = other.x;
-            y = other.y;
-        }
-        return *this;
-    }
-
-    BeamNode(BeamNode&& other) noexcept {
-        *this = std::move(other);
-    }
-
-    BeamNode& operator=(BeamNode&& other) noexcept {
-        if (this != &other) {
-            if (checkpoint) checkpoint->release();
-            checkpoint = other.checkpoint;
-            other.checkpoint = nullptr;
-            p1 = other.p1;
-            p2 = other.p2;
-            hasP2 = other.hasP2;
-            tick = other.tick;
-            arenaIndex = other.arenaIndex;
-            buttonDown = other.buttonDown;
-            clearance = other.clearance;
-            x = other.x;
-            y = other.y;
-        }
-        return *this;
-    }
-};
-
-struct SavedLayer {
-    uint32_t layerTick = 0;
-    float maxReachedX = 0.0f;
-    std::vector<BeamNode> nodes;
 };
 
 } // namespace solver

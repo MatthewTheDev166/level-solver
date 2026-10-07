@@ -6,7 +6,6 @@
 #include "../core/DeterministicPRNG.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../engine/HeadlessEngine.hpp"
-#include "../solver/AStarSolver.hpp"
 #include "../solver/SwarmSolver.hpp"
 #include "../replay/MacroManager.hpp"
 #include "../ui/TelemetryPopup.hpp"
@@ -80,8 +79,6 @@ static void updateReplayBadge(PlayLayer* pl) {
 class $modify(SolverPlayerObject, PlayerObject) {
     static void onModify(auto& self) {
         (void)self.setHookPriority("PlayerObject::playerDestroyed", geode::Priority::First);
-        (void)self.setHookPriority("PlayerObject::pushButton", geode::Priority::First);
-        (void)self.setHookPriority("PlayerObject::releaseButton", geode::Priority::First);
     }
 
     void playerDestroyed(bool noEffects) {
@@ -93,20 +90,6 @@ class $modify(SolverPlayerObject, PlayerObject) {
             return;
         }
         PlayerObject::playerDestroyed(noEffects);
-    }
-
-    void pushButton(PlayerButton button) {
-        if (solver::MacroManager::get().isReplaying() && !solver::MacroManager::get().isDispatchingInput()) {
-            return;
-        }
-        PlayerObject::pushButton(button);
-    }
-
-    void releaseButton(PlayerButton button) {
-        if (solver::MacroManager::get().isReplaying() && !solver::MacroManager::get().isDispatchingInput()) {
-            return;
-        }
-        PlayerObject::releaseButton(button);
     }
 };
 
@@ -193,7 +176,7 @@ class $modify(SolverPlayLayer, PlayLayer) {
         int levelID = level ? level->m_levelID.value() : 0;
         std::string levelName = level ? level->m_levelName : "";
 
-        if (solver::MacroManager::get().isArmed()) {
+        if (solver::MacroManager::get().isReplaySessionActive()) {
             int armedID = solver::MacroManager::get().getArmedLevelID();
             std::string armedName = solver::MacroManager::get().getArmedLevelName();
 
@@ -202,11 +185,15 @@ class $modify(SolverPlayLayer, PlayLayer) {
                 levelMatches = true;
             } else if (armedID <= 0 && levelID <= 0) {
                 levelMatches = (armedName == levelName || armedName.empty() || levelName.empty());
+            } else {
+                levelMatches = (!armedName.empty() && armedName == levelName);
             }
 
             if (levelMatches) {
                 solver::DeterministicPRNG::clampSeed();
-                solver::MacroManager::get().onLevelReset(this);
+                if (!solver::MacroManager::get().isPlaying()) {
+                    solver::MacroManager::get().onLevelReset(this);
+                }
             } else {
                 solver::MacroManager::get().stopReplay(this);
             }
@@ -215,9 +202,6 @@ class $modify(SolverPlayLayer, PlayLayer) {
             solver::MacroManager::get().stopReplay(this);
             if (solver::SwarmSolver::get().isRunning()) {
                 solver::SwarmSolver::get().stop();
-            }
-            if (solver::AStarSolver::get().isRunning()) {
-                solver::AStarSolver::get().stop();
             }
         }
 
@@ -318,9 +302,6 @@ class $modify(SolverPlayLayer, PlayLayer) {
     void onQuit() {
         if (solver::SwarmSolver::get().isRunning()) {
             solver::SwarmSolver::get().stop();
-        }
-        if (solver::AStarSolver::get().isRunning()) {
-            solver::AStarSolver::get().stop();
         }
         solver::MacroManager::get().stopReplay(this);
         solver::CheatAPIIntegrator::notifyCheatEnded();

@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.5.5";
+    std::string verStr = "v1.6.0";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -146,10 +146,10 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
     m_mainLayer->addChild(m_macroStatusLabel);
 
-    // Checkbox for toggling HUD display during replay playback
-    auto hudMenu = CCMenu::create();
-    hudMenu->setPosition({ xOffset, 62.0f });
-    m_mainLayer->addChild(hudMenu);
+    // Checkboxes menu for toggling HUD display and Solver mode
+    auto togglesMenu = CCMenu::create();
+    togglesMenu->setPosition({ xOffset, 62.0f });
+    m_mainLayer->addChild(togglesMenu);
 
     m_hudToggler = CCMenuItemToggler::createWithStandardSprites(
         this,
@@ -159,13 +159,30 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     bool showHUD = Mod::get()->getSavedValue<bool>("show-replay-hud", true);
     m_hudToggler->toggle(showHUD);
     m_hudToggler->setPosition({ 10.0f, 0.0f });
-    hudMenu->addChild(m_hudToggler);
+    togglesMenu->addChild(m_hudToggler);
 
-    auto hudLabel = CCLabelBMFont::create("Show HUD on Replay", "chatFont.fnt");
+    auto hudLabel = CCLabelBMFont::create("Show HUD", "chatFont.fnt");
     hudLabel->setScale(0.70f);
     hudLabel->setAnchorPoint({ 0.0f, 0.5f });
     hudLabel->setPosition({ 26.0f, 0.0f });
-    hudMenu->addChild(hudLabel);
+    togglesMenu->addChild(hudLabel);
+
+    m_solverModeToggler = CCMenuItemToggler::createWithStandardSprites(
+        this,
+        menu_selector(TelemetryPopup::onToggleSolverMode),
+        0.65f
+    );
+    std::string savedMode = Mod::get()->getSavedValue<std::string>("solver-mode", "spawn-respawn");
+    bool isSpawnMode = (savedMode != "checkpoints");
+    m_solverModeToggler->toggle(isSpawnMode);
+    m_solverModeToggler->setPosition({ 165.0f, 0.0f });
+    togglesMenu->addChild(m_solverModeToggler);
+
+    auto modeLabel = CCLabelBMFont::create("Spawn Respawn Mode", "chatFont.fnt");
+    modeLabel->setScale(0.70f);
+    modeLabel->setAnchorPoint({ 0.0f, 0.5f });
+    modeLabel->setPosition({ 181.0f, 0.0f });
+    togglesMenu->addChild(modeLabel);
 
     // Control buttons menu
     auto buttonMenu = CCMenu::create();
@@ -208,16 +225,18 @@ void TelemetryPopup::update(float dt) {
         eglView->showCursor(true);
     }
 
-    // Ensure mouse cursor remains visible while popup is open
-    if (auto eglView = cocos2d::CCEGLView::sharedOpenGLView()) {
-        eglView->showCursor(true);
-    }
-
     // If running in background, advance headless swarm batch
     if (SwarmSolver::get().isRunning() && m_headlessPlayLayer) {
         ActiveLayerScope scope(m_headlessPlayLayer);
         SwarmSolver::get().stepSwarmBatch(m_headlessPlayLayer, HeadlessEngine::get().getBatchSize());
     }
+
+    // Throttle telemetry UI label formatting to 15 Hz to reduce CPU overhead
+    m_uiUpdateTimer += dt;
+    if (m_uiUpdateTimer < (1.0f / 15.0f)) {
+        return;
+    }
+    m_uiUpdateTimer = 0.0f;
 
     auto telemetry = SwarmSolver::get().getTelemetry();
 
@@ -516,6 +535,17 @@ void TelemetryPopup::onToggleShowHUD(cocos2d::CCObject* sender) {
     geode::log::info("[LevelSolver] Replay HUD visibility toggled: {}", showHUD);
 }
 
+void TelemetryPopup::onToggleSolverMode(cocos2d::CCObject* sender) {
+    auto toggler = typeinfo_cast<CCMenuItemToggler*>(sender);
+    if (!toggler) return;
+    bool isSpawn = toggler->isOn();
+    std::string modeStr = isSpawn ? "spawn-respawn" : "checkpoints";
+    Mod::get()->setSavedValue("solver-mode", modeStr);
+    Mod::get()->setSettingValue("solver-mode", modeStr);
+    SwarmSolver::get().setSolverMode(isSpawn ? SolverMode::SpawnRespawn : SolverMode::Checkpoints);
+    geode::log::info("[LevelSolver] Solver exploration mode toggled to: {}", modeStr);
+}
+
 void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
     if (!m_level) return;
     int levelID = m_level->m_levelID.value();
@@ -566,7 +596,7 @@ void TelemetryPopup::onReplayMacro(cocos2d::CCObject* sender) {
 
     // Transition to gameplay scene to watch playback cleanly
     auto scene = PlayLayer::scene(level, false, false);
-    cocos2d::CCDirector::sharedDirector()->replaceScene(cocos2d::CCTransitionFade::create(0.5f, scene));
+    cocos2d::CCDirector::sharedDirector()->replaceScene(scene);
 }
 
 } // namespace solver

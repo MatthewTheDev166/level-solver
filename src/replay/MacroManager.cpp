@@ -1,7 +1,9 @@
 #include "MacroManager.hpp"
+#include "GDRExporter.hpp"
 #include "../core/CheatAPIIntegrator.hpp"
 #include "../core/DeterministicPRNG.hpp"
 #include <Geode/binding/PlayerObject.hpp>
+#include <gdr/gdr.hpp>
 #include <matjson.hpp>
 #include <fstream>
 #include <algorithm>
@@ -130,8 +132,50 @@ bool MacroManager::saveMacro(int levelID, const std::string& levelName) {
 bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
     try {
         auto filePath = getMacroPath(levelID, levelName);
-        if (!std::filesystem::exists(filePath)) {
-            return false;
+        std::error_code ec;
+
+        if (!std::filesystem::exists(filePath, ec)) {
+            // Fallback: search exported replay files across all replay directories
+            std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
+            auto replayDirs = GDRExporter::getAllReplayDirectories();
+            bool foundCandidate = false;
+
+            for (const auto& dir : replayDirs) {
+                // First try JSON macros
+                for (const auto& suffix : { "-macro.json", ".json" }) {
+                    auto cand = dir / (safeName + suffix);
+                    if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
+                        filePath = cand;
+                        foundCandidate = true;
+                        break;
+                    }
+                }
+                if (foundCandidate) break;
+
+                // Next try GDR2/GDR binary macros
+                for (const auto& suffix : { "-macro.gdr2", ".gdr2", "-macro.gdr", ".gdr" }) {
+                    auto cand = dir / (safeName + suffix);
+                    if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
+                        auto res = gdr::Replay::importData(cand);
+                        if (res.isOk()) {
+                            const auto& replay = res.unwrap();
+                            std::vector<TickAction> loaded;
+                            for (const auto& inp : replay.inputs) {
+                                loaded.push_back({ static_cast<uint32_t>(inp.frame), inp.down });
+                            }
+                            setActions(loaded);
+                            m_trajectorySamples.clear();
+                            geode::log::info("[LevelSolver] Loaded {} inputs from binary GDR file: {}",
+                                m_actions.size(), cand.string());
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if (!foundCandidate) {
+                return false;
+            }
         }
 
         std::ifstream file(filePath);
@@ -155,7 +199,9 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
                 for (const auto& item : rootVal["inputs"].asArray().unwrap()) {
                     TickAction act;
                     if (item.contains("tick")) act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+                    else if (item.contains("frame")) act.tick = static_cast<uint32_t>(item["frame"].asDouble().unwrapOr(0.0));
                     if (item.contains("pressed")) act.pressed = item["pressed"].asBool().unwrapOr(false);
+                    else if (item.contains("down")) act.pressed = item["down"].asBool().unwrapOr(false);
                     loaded.push_back(act);
                 }
             }
@@ -172,7 +218,9 @@ bool MacroManager::loadMacro(int levelID, const std::string& levelName) {
             for (const auto& item : rootVal.asArray().unwrap()) {
                 TickAction act;
                 if (item.contains("tick")) act.tick = static_cast<uint32_t>(item["tick"].asDouble().unwrapOr(0.0));
+                else if (item.contains("frame")) act.tick = static_cast<uint32_t>(item["frame"].asDouble().unwrapOr(0.0));
                 if (item.contains("pressed")) act.pressed = item["pressed"].asBool().unwrapOr(false);
+                else if (item.contains("down")) act.pressed = item["down"].asBool().unwrapOr(false);
                 loaded.push_back(act);
             }
         }
@@ -192,9 +240,29 @@ bool MacroManager::hasMacro(int levelID, const std::string& levelName) const {
     auto filePath = getMacroPath(levelID, levelName);
     std::error_code ec;
     bool exists = std::filesystem::exists(filePath, ec);
-    if (ec || !exists) return false;
-    auto size = std::filesystem::file_size(filePath, ec);
-    return !ec && size > 0;
+    if (!ec && exists && std::filesystem::file_size(filePath, ec) > 0) {
+        return true;
+    }
+
+    std::string safeName = GDRExporter::sanitizeFilename(levelName, levelID);
+    auto replayDirs = GDRExporter::getAllReplayDirectories();
+    for (const auto& dir : replayDirs) {
+        for (const auto& suffix : { "-macro.gdr2", "-macro.json", "-macro.gdr", ".gdr2", ".json", ".gdr" }) {
+            auto cand = dir / (safeName + suffix);
+            if (std::filesystem::exists(cand, ec) && !ec && std::filesystem::file_size(cand, ec) > 0) {
+                return true;
+            }
+        }
+        if (levelID > 0) {
+            for (const auto& suffix : { "-macro.gdr2", "-macro.json", ".json", ".gdr2" }) {
+                auto candID = dir / fmt::format("{}{}", levelID, suffix);
+                if (std::filesystem::exists(candID, ec) && !ec && std::filesystem::file_size(candID, ec) > 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void MacroManager::armReplay(int levelID, const std::string& levelName) {
@@ -307,6 +375,13 @@ void MacroManager::stepReplay(PlayLayer* playLayer) {
         if (act.pressed != m_lastButtonState) {
             m_isDispatchingInput = true;
             playLayer->handleButton(act.pressed, 1, true);
+            if (playLayer->m_player1) {
+                if (act.pressed) {
+                    playLayer->m_player1->pushButton(PlayerButton::Jump);
+                } else {
+                    playLayer->m_player1->releaseButton(PlayerButton::Jump);
+                }
+            }
             m_isDispatchingInput = false;
             m_lastButtonState = act.pressed;
             geode::log::info("[LevelSolver] Replay dispatch tick {}: {} at X={:.1f}, Y={:.1f}",

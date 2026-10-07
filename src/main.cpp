@@ -2,7 +2,6 @@
 #include "core/DeterministicPRNG.hpp"
 #include "core/CheatAPIIntegrator.hpp"
 #include "engine/HeadlessEngine.hpp"
-#include "solver/AStarSolver.hpp"
 #include "replay/MacroManager.hpp"
 
 using namespace geode::prelude;

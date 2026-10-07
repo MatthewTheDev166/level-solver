@@ -24,6 +24,7 @@ protected:
     void onReplayMacro(cocos2d::CCObject* sender);
     void onExportMacro(cocos2d::CCObject* sender);
     void onToggleShowHUD(cocos2d::CCObject* sender);
+    void onToggleSolverMode(cocos2d::CCObject* sender);
 
     void cleanupHeadless();
 
@@ -46,6 +47,8 @@ private:
     CCMenuItemSpriteExtra* m_replayButton = nullptr;
     CCMenuItemSpriteExtra* m_exportButton = nullptr;
     CCMenuItemToggler* m_hudToggler = nullptr;
+    CCMenuItemToggler* m_solverModeToggler = nullptr;
+    float m_uiUpdateTimer = 0.0f;
 };
 
 } // namespace solver

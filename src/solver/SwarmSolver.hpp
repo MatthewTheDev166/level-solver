@@ -7,8 +7,14 @@
 #include "../engine/HazardDetector.hpp"
 #include <vector>
 #include <cstdint>
+#include <string>
 
 namespace solver {
+
+enum class SolverMode : uint8_t {
+    SpawnRespawn = 0,
+    Checkpoints = 1
+};
 
 class SwarmSolver {
 public:
@@ -31,6 +37,9 @@ public:
     const std::vector<TickAction>& getResolvedMacro() const;
     const std::vector<TrajectorySample>& getTrajectory() const;
 
+    SolverMode getSolverMode() const { return m_solverMode; }
+    void setSolverMode(SolverMode mode) { m_solverMode = mode; }
+
 private:
     SwarmSolver() = default;
 
@@ -50,7 +59,6 @@ private:
     // Rollout a single bot through the horizon
     void simulateBot(
         PlayLayer* playLayer,
-        const BeamCheckpoint& checkpoint,
         SwarmBot& bot,
         uint32_t horizonTicks
     );
@@ -58,18 +66,7 @@ private:
     // Commit a solution upon reaching 100%
     void finalizeSolution(PlayLayer* playLayer, const std::vector<TickAction>& winningActions);
 
-    // Backtrack to parent or runner-up
-    void handleBacktrack(PlayLayer* playLayer);
-
-    struct BlacklistedTrap {
-        float x = 0.0f;
-        VehicleMode mode = VehicleMode::Cube;
-    };
-
-    // Check if a coordinate is near a blacklisted trap
-    bool isNearBlacklistedTrap(float x, VehicleMode mode) const;
-    void blacklistTrap(float x, VehicleMode mode);
-
+    SolverMode m_solverMode = SolverMode::SpawnRespawn;
     bool m_isRunning = false;
     bool m_isCompleted = false;
     int m_levelID = 0;
@@ -80,11 +77,20 @@ private:
     float m_maxReachedX = 0.0f;
     uint32_t m_currentTick = 0;
 
-    // Checkpoint Tree Stack
+    // Prefix-Locked Swarm from Spawn state
+    uint32_t m_frontierTick = 0;
+    float m_frontierX = 0.0f;
+    VehicleMode m_frontierMode = VehicleMode::Cube;
+    std::vector<TickAction> m_verifiedPrefix;
+    PlayerSnapshot m_rootSnapshot;
+    PlayerSnapshot m_rootSnapshot2;
+    bool m_hasPlayer2 = false;
+
+    // Classic Checkpoints fallback stack
     std::vector<BeamCheckpoint> m_checkpointStack;
+
     std::vector<TickAction> m_resolvedMacro;
     std::vector<TrajectorySample> m_trajectorySamples;
-    std::vector<SwarmBot> m_partialProgressSeeds;
 
     // Active wave state
     uint32_t m_activeWaveIndex = 0;
@@ -98,7 +104,6 @@ private:
     size_t m_currentBotIndex = 0;
     std::vector<SwarmBot> m_currentWaveSurvivors;
     uint32_t m_currentHorizonTicks = 0;
-    std::vector<BlacklistedTrap> m_blacklistedTraps;
 
     TelemetryMetrics m_telemetry;
 };
