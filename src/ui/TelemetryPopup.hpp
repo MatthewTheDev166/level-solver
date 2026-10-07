@@ -34,12 +34,11 @@ private:
     cocos2d::CCScene* m_headlessScene = nullptr;
 
     cocos2d::CCLabelBMFont* m_statusLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_horizonLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_progressLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_aliveBotsLabel = nullptr;
     cocos2d::CCLabelBMFont* m_waveLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_populationLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_backtrackLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_memoryLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_throughputLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_checkpointLabel = nullptr;
+    cocos2d::CCLabelBMFont* m_speedLabel = nullptr;
     cocos2d::CCLabelBMFont* m_macroStatusLabel = nullptr;
 
     CCMenuItemSpriteExtra* m_startButton = nullptr;

@@ -63,7 +63,7 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     }
 
     m_level = level;
-    std::string verStr = "v1.5.2";
+    std::string verStr = "v1.5.3";
     this->setTitle(fmt::format("Level Solver {}", verStr));
 
     // Display version in upper corner of stats panel
@@ -74,77 +74,73 @@ bool TelemetryPopup::init(float width, float height, GJGameLevel* level) {
     verBadge->setColor({ 140, 190, 255 });
     m_mainLayer->addChild(verBadge);
 
-    float yOffset = 215.0f;
-    float lineHeight = 18.0f;
+    float yOffset = 216.0f;
+    float lineHeight = 19.0f;
     float xOffset = 30.0f;
 
-    // Status label
+    // 1. Status label
     m_statusLabel = CCLabelBMFont::create("Status: Idle", "bigFont.fnt");
     m_statusLabel->setScale(0.38f);
     m_statusLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_statusLabel->setPosition({ xOffset, yOffset });
-    m_statusLabel->setColor({ 0, 255, 128 });
+    m_statusLabel->setColor({ 180, 200, 220 });
     m_mainLayer->addChild(m_statusLabel);
-    yOffset -= lineHeight + 4.0f;
+    yOffset -= lineHeight + 2.0f;
 
-    // Exploration Horizon label
-    m_horizonLabel = CCLabelBMFont::create("Exploration Horizon: 0.0%", "bigFont.fnt");
-    m_horizonLabel->setScale(0.42f);
-    m_horizonLabel->setAnchorPoint({ 0.0f, 0.5f });
-    m_horizonLabel->setPosition({ xOffset, yOffset });
-    m_horizonLabel->setColor({ 255, 215, 0 });
-    m_mainLayer->addChild(m_horizonLabel);
-    yOffset -= lineHeight + 4.0f;
+    // 2. Exploration Progress label
+    m_progressLabel = CCLabelBMFont::create("Exploration Progress: 0.0%", "bigFont.fnt");
+    m_progressLabel->setScale(0.40f);
+    m_progressLabel->setAnchorPoint({ 0.0f, 0.5f });
+    m_progressLabel->setPosition({ xOffset, yOffset });
+    m_progressLabel->setColor({ 255, 215, 0 });
+    m_mainLayer->addChild(m_progressLabel);
+    yOffset -= lineHeight + 2.0f;
 
-    // Frontier / Width label
-    m_waveLabel = CCLabelBMFont::create("Frontier: 0 nodes | Search Width: 96", "chatFont.fnt");
+    // 3. Real-time Bots Alive label
+    m_aliveBotsLabel = CCLabelBMFont::create("Bots Alive: 160 / 160", "bigFont.fnt");
+    m_aliveBotsLabel->setScale(0.38f);
+    m_aliveBotsLabel->setAnchorPoint({ 0.0f, 0.5f });
+    m_aliveBotsLabel->setPosition({ xOffset, yOffset });
+    m_aliveBotsLabel->setColor({ 80, 220, 255 });
+    m_mainLayer->addChild(m_aliveBotsLabel);
+    yOffset -= lineHeight + 1.0f;
+
+    // 4. Wave Info label
+    m_waveLabel = CCLabelBMFont::create("Wave: #1 (Attempt 1/10)", "chatFont.fnt");
     m_waveLabel->setScale(0.80f);
     m_waveLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_waveLabel->setPosition({ xOffset, yOffset });
+    m_waveLabel->setColor({ 240, 240, 240 });
     m_mainLayer->addChild(m_waveLabel);
     yOffset -= lineHeight;
 
-    // Deepest Tick / Progress label
-    m_populationLabel = CCLabelBMFont::create("Progress: 0.0% | Deepest: tick 0", "chatFont.fnt");
-    m_populationLabel->setScale(0.80f);
-    m_populationLabel->setAnchorPoint({ 0.0f, 0.5f });
-    m_populationLabel->setPosition({ xOffset, yOffset });
-    m_mainLayer->addChild(m_populationLabel);
+    // 5. Checkpoints & Backtracks label
+    m_checkpointLabel = CCLabelBMFont::create("Checkpoints: 1 | Backtracks: 0", "chatFont.fnt");
+    m_checkpointLabel->setScale(0.80f);
+    m_checkpointLabel->setAnchorPoint({ 0.0f, 0.5f });
+    m_checkpointLabel->setPosition({ xOffset, yOffset });
+    m_checkpointLabel->setColor({ 200, 225, 255 });
+    m_mainLayer->addChild(m_checkpointLabel);
     yOffset -= lineHeight;
 
-    // Rewinds / Stuck position label
-    m_backtrackLabel = CCLabelBMFont::create("Stuck at: None | Rewinds: 0", "chatFont.fnt");
-    m_backtrackLabel->setScale(0.80f);
-    m_backtrackLabel->setAnchorPoint({ 0.0f, 0.5f });
-    m_backtrackLabel->setPosition({ xOffset, yOffset });
-    m_mainLayer->addChild(m_backtrackLabel);
+    // 6. Solving Speed label
+    m_speedLabel = CCLabelBMFont::create("Speed: 0 ticks/sec", "chatFont.fnt");
+    m_speedLabel->setScale(0.80f);
+    m_speedLabel->setAnchorPoint({ 0.0f, 0.5f });
+    m_speedLabel->setPosition({ xOffset, yOffset });
+    m_speedLabel->setColor({ 160, 255, 160 });
+    m_mainLayer->addChild(m_speedLabel);
     yOffset -= lineHeight;
 
-    // Memory Footprint label
-    m_memoryLabel = CCLabelBMFont::create("Memory Footprint: 0.00 MB", "chatFont.fnt");
-    m_memoryLabel->setScale(0.75f);
-    m_memoryLabel->setAnchorPoint({ 0.0f, 0.5f });
-    m_memoryLabel->setPosition({ xOffset, yOffset });
-    m_mainLayer->addChild(m_memoryLabel);
-    yOffset -= lineHeight;
-
-    // Simulation Throughput label
-    m_throughputLabel = CCLabelBMFont::create("Simulation Rate: 0 ticks/sec", "chatFont.fnt");
-    m_throughputLabel->setScale(0.75f);
-    m_throughputLabel->setAnchorPoint({ 0.0f, 0.5f });
-    m_throughputLabel->setPosition({ xOffset, yOffset });
-    m_mainLayer->addChild(m_throughputLabel);
-    yOffset -= lineHeight;
-
-    // Macro status label
+    // 7. Saved Replay label
     int levelID = level ? level->m_levelID.value() : 0;
     std::string levelName = level ? level->m_levelName : "";
     bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName);
     m_macroStatusLabel = CCLabelBMFont::create(
-        hasSavedMacro ? "Saved Macro: Available on Disk (Ready to Replay)" : "Saved Macro: None Found",
+        hasSavedMacro ? "Saved Replay: Available (Ready to Replay)" : "Saved Replay: None",
         "chatFont.fnt"
     );
-    m_macroStatusLabel->setScale(0.7f);
+    m_macroStatusLabel->setScale(0.75f);
     m_macroStatusLabel->setAnchorPoint({ 0.0f, 0.5f });
     m_macroStatusLabel->setPosition({ xOffset, yOffset });
     m_macroStatusLabel->setColor(hasSavedMacro ? cocos2d::ccColor3B{100, 255, 100} : cocos2d::ccColor3B{180, 180, 180});
@@ -244,52 +240,44 @@ void TelemetryPopup::update(float dt) {
         m_startButton->setEnabled(true);
         m_stopButton->setEnabled(false);
     } else if (telemetry.status == SolverStatus::Searching) {
-        std::string statusText = "Status: Searching";
-        if (!telemetry.detailMessage.empty()) {
-            statusText += " - " + telemetry.detailMessage;
-        }
-        m_statusLabel->setString(statusText.c_str());
+        m_statusLabel->setString("Status: Searching");
         m_statusLabel->setColor({ 0, 255, 128 });
     } else if (telemetry.status == SolverStatus::Paused) {
         m_statusLabel->setString("Status: Paused");
         m_statusLabel->setColor({ 255, 200, 0 });
-    }
-
-    // Update horizon %
-    m_horizonLabel->setString(fmt::format("Exploration Horizon: {:.1f}%", telemetry.explorationHorizon).c_str());
-
-    // Update frontier & width
-    m_waveLabel->setString(fmt::format("Checkpoints: {} | Swarm Size: {} | Backtracks: {}",
-        telemetry.frontierSize, telemetry.currentWidth, telemetry.rewindCount).c_str());
-
-    // Update deepest progress
-    m_populationLabel->setString(fmt::format("Progress: {:.1f}% | Deepest: tick {}",
-        telemetry.explorationHorizon, telemetry.deepestTick).c_str());
-
-    // Update stuck X / rewinds
-    if (telemetry.stuckX > 0.0f) {
-        m_backtrackLabel->setString(fmt::format("Stuck near X: {:.1f} | Backtracks: {}", telemetry.stuckX, telemetry.rewindCount).c_str());
     } else {
-        m_backtrackLabel->setString(fmt::format("Active Swarm | Backtracks: {}", telemetry.rewindCount).c_str());
+        m_statusLabel->setString("Status: Idle");
+        m_statusLabel->setColor({ 180, 200, 220 });
     }
 
-    // Memory footprint
-    float memMB = static_cast<float>(telemetry.frontierSize * sizeof(BeamCheckpoint) + telemetry.currentWidth * sizeof(SwarmBot)) / (1024.0f * 1024.0f);
-    m_memoryLabel->setString(fmt::format("Memory Footprint: {:.2f} MB", memMB).c_str());
+    // Update Exploration Progress
+    m_progressLabel->setString(fmt::format("Exploration Progress: {:.1f}%", telemetry.explorationHorizon).c_str());
 
-    // Throughput
-    m_throughputLabel->setString(fmt::format("Simulation Rate: {:.0f} ticks/sec", telemetry.ticksPerSecond).c_str());
+    // Update Real-time Bots Alive
+    m_aliveBotsLabel->setString(fmt::format("Bots Alive: {} / {}", telemetry.aliveBots, telemetry.totalBots).c_str());
 
-    // Macro status
+    // Update Wave Info
+    uint32_t displayWave = telemetry.activeWave == 0 ? 1 : telemetry.activeWave;
+    uint32_t displayAttempt = telemetry.waveAttempt == 0 ? 1 : telemetry.waveAttempt;
+    m_waveLabel->setString(fmt::format("Wave: #{} (Attempt {}/10)", displayWave, displayAttempt).c_str());
+
+    // Update Checkpoints & Backtracks
+    m_checkpointLabel->setString(fmt::format("Checkpoints: {} | Backtracks: {}",
+        telemetry.frontierSize, telemetry.rewindCount).c_str());
+
+    // Update Solving Speed
+    m_speedLabel->setString(fmt::format("Speed: {:.0f} ticks/sec", telemetry.ticksPerSecond).c_str());
+
+    // Macro / Replay status
     int levelID = m_level ? m_level->m_levelID.value() : 0;
     std::string levelName = m_level ? m_level->m_levelName : "";
     bool hasSavedMacro = MacroManager::get().hasMacro(levelID, levelName) || SwarmSolver::get().isCompleted();
     if (m_macroStatusLabel) {
         if (hasSavedMacro) {
-            m_macroStatusLabel->setString(telemetry.isVerified ? "Saved Macro: Available on Disk (Verified 100%)" : "Saved Macro: Available on Disk (Ready to Replay)");
+            m_macroStatusLabel->setString(telemetry.isVerified ? "Saved Replay: Available (100% Verified)" : "Saved Replay: Available (Ready to Replay)");
             m_macroStatusLabel->setColor({ 100, 255, 100 });
         } else {
-            m_macroStatusLabel->setString("Saved Macro: None Found");
+            m_macroStatusLabel->setString("Saved Replay: None");
             m_macroStatusLabel->setColor({ 180, 180, 180 });
         }
     }
@@ -297,13 +285,12 @@ void TelemetryPopup::update(float dt) {
     // Ensure all labels fit cleanly inside the popup box without overflowing
     const float maxLabelW = 425.0f;
     fitLabel(m_statusLabel, maxLabelW, 0.38f);
-    fitLabel(m_horizonLabel, maxLabelW, 0.42f);
+    fitLabel(m_progressLabel, maxLabelW, 0.40f);
+    fitLabel(m_aliveBotsLabel, maxLabelW, 0.38f);
     fitLabel(m_waveLabel, maxLabelW, 0.80f);
-    fitLabel(m_populationLabel, maxLabelW, 0.80f);
-    fitLabel(m_backtrackLabel, maxLabelW, 0.80f);
-    fitLabel(m_memoryLabel, maxLabelW, 0.75f);
-    fitLabel(m_throughputLabel, maxLabelW, 0.75f);
-    fitLabel(m_macroStatusLabel, maxLabelW, 0.70f);
+    fitLabel(m_checkpointLabel, maxLabelW, 0.80f);
+    fitLabel(m_speedLabel, maxLabelW, 0.80f);
+    fitLabel(m_macroStatusLabel, maxLabelW, 0.75f);
 
     // Button states
     bool isSearching = SwarmSolver::get().isRunning();

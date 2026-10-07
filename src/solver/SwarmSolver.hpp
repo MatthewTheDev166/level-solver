@@ -59,7 +59,13 @@ private:
     // Backtrack to parent or runner-up
     void handleBacktrack(PlayLayer* playLayer);
 
-    bool runSelfTest(PlayLayer* playLayer);
+    struct BlacklistedTrap {
+        float x = 0.0f;
+        VehicleMode mode = VehicleMode::Cube;
+    };
+
+    // Check if a coordinate is near a blacklisted trap
+    bool isNearBlacklistedTrap(float x, VehicleMode mode) const;
 
     bool m_isRunning = false;
     bool m_isCompleted = false;
@@ -89,6 +95,7 @@ private:
     size_t m_currentBotIndex = 0;
     std::vector<SwarmBot> m_currentWaveSurvivors;
     uint32_t m_currentHorizonTicks = 0;
+    std::vector<BlacklistedTrap> m_blacklistedTraps;
 
     TelemetryMetrics m_telemetry;
 };

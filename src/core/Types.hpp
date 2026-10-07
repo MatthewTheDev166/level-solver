@@ -62,6 +62,10 @@ struct TelemetryMetrics {
     float ticksPerSecond = 0.0f;
     bool isVerified = false;
 
+    size_t aliveBots = 160;
+    size_t totalBots = 160;
+    uint32_t waveAttempt = 1;
+
     // Compatibility fields
     size_t openNodes = 0;
     size_t exploredNodes = 0;
